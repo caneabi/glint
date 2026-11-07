@@ -20,6 +20,19 @@ namespace Glint
         bool recording;
         public Action Recorded;
         public bool IsRecording { get { return recording; } }
+        bool clearDown, clearHot;
+
+        Rectangle ClearRect { get { int s = Ui.S(24); return new Rectangle(Width - s - Ui.S(2), (Height - s) / 2, s, s); } }
+        bool CanClear { get { return !recording && !string.IsNullOrEmpty(value); } }
+
+        protected override void OnMouseDown(MouseEventArgs e) { clearDown = CanClear && ClearRect.Contains(e.Location); base.OnMouseDown(e); }
+        protected override void OnMouseMove(MouseEventArgs e)
+        {
+            bool hot = CanClear && ClearRect.Contains(e.Location);
+            if (hot != clearHot) { clearHot = hot; Invalidate(); }
+            base.OnMouseMove(e);
+        }
+        protected override void OnMouseLeave(EventArgs e) { clearHot = false; Invalidate(); base.OnMouseLeave(e); }
 
         public KeyRecorder(string v)
         {
@@ -56,13 +69,21 @@ namespace Glint
             var g = e.Graphics; Ui.Prepare(g); g.Clear(Ui.Card);
             g.ScaleTransform(Ui.F, Ui.F);
             float w = Width / Ui.F, h = Height / Ui.F;
-            Ui.Pill(g, new RectangleF(0, 0, w - 1, h - 1), recording ? Ui.Accent : Ui.Well, Ui.ControlRadius);
-            Ui.Center(g, Text, Ui.Small, recording ? Brand.Dark : !string.IsNullOrEmpty(value) ? Ui.Text : Ui.Dim, new RectangleF(6, 0, w - 12, h));
+            Ui.Pill(g, new RectangleF(0, 0, w, h), recording ? Ui.Accent : Ui.Well, Ui.ControlRadius);
+            Ui.Center(g, Text, Ui.Small, recording ? Brand.Dark : !string.IsNullOrEmpty(value) ? Ui.Text : Ui.Dim, CanClear ? new RectangleF(24, 0, w - 48, h) : new RectangleF(6, 0, w - 12, h));
+            if (CanClear) Icons.DrawLucide(g, "x", w - 14, h / 2, 12, 1.4f, clearHot ? Ui.Text : Ui.Dim);
         }
 
         protected override void OnClick(EventArgs e)
         {
             base.OnClick(e);
+            if (clearDown)
+            {
+                clearDown = false; clearHot = false;
+                Value = "";
+                if (Recorded != null) Recorded();
+                return;
+            }
             if (recording) { Stop(); return; }
             if (Tray.Instance != null) Tray.Instance.SuspendHotkeys();
             recording = true;

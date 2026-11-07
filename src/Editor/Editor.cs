@@ -550,12 +550,12 @@ namespace Glint
                 case "ruler":
                     using (var f = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Pixel))
                     using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                    using (var br = new SolidBrush(c)) g.DrawString("12", f, br, cx, cy - 5, sf);
+                    using (var br = new SolidBrush(c)) g.DrawString("12", f, br, cx, cy - 6, sf);
                     using (var p = new Pen(c, 1.4f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
                     {
-                        g.DrawLine(p, cx - 9, cy + 5, cx + 9, cy + 5);
-                        g.DrawLine(p, cx - 9, cy + 2, cx - 9, cy + 8);
-                        g.DrawLine(p, cx + 9, cy + 2, cx + 9, cy + 8);
+                        g.DrawLine(p, cx - 9, cy + 6, cx + 9, cy + 6);
+                        g.DrawLine(p, cx - 9, cy + 3, cx - 9, cy + 9);
+                        g.DrawLine(p, cx + 9, cy + 3, cx + 9, cy + 9);
                     }
                     break;
                 default: Icons.DrawLucide(g, Icons.Name(b.Id), cx, cy, 20, 1.5f, c); break;
@@ -930,7 +930,7 @@ namespace Glint
                 case "backdrop": backdrop = backdrop + 1 >= Renderer.Gradients.Length ? -1 : backdrop + 1; Recompose(); break;
                 case "ocr": RunOcr(); break;
                 case "addcap": AddCapture(); break;
-                case "pin": new PinWindow(Export()).Show(); break;
+                case "pin": new PinWindow(Export()).Show(); Close(); break;
                 case "upload": RunUpload(Uploader.Active); break;
                 case "save": Save(); break;
                 case "copy": CopyImage(); break;
@@ -1127,7 +1127,7 @@ namespace Glint
                     case Keys.S: if (shift) SaveAs(); else Save(); return true;
                     case Keys.Z: if (shift) Restore(redo, undo); else Restore(undo, redo); return true;
                     case Keys.Y: Restore(redo, undo); return true;
-                    case Keys.P: new PinWindow(Export()).Show(); return true;
+                    case Keys.P: new PinWindow(Export()).Show(); Close(); return true;
                     case Keys.U: RunUpload(Uploader.Active); return true;
                     case Keys.T: RunOcr(); return true;
                     case Keys.O: Tray.Instance.OpenFile(); return true;

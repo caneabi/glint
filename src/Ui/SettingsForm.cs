@@ -96,6 +96,7 @@ namespace Glint
             var channel = new Segmented(new[] { "stable", "nightly" }, new[] { "Stable", "Nightly" }, s.UpdateChannel, 150);
             channel.Changed = () => { s.UpdateChannel = channel.Value; s.Save(); };
             p.AddRow(L.T("Update-Kanal"), channel);
+            p.BeginGroup();
             var checkNow = new PillButton(L.T("Jetzt suchen"), 110);
             checkNow.Changed = () => Updater.Check(true);
             p.AddRow(L.T("Version ") + Updater.CurrentText, checkNow);
@@ -156,16 +157,18 @@ namespace Glint
             };
             p.AddStretch(L.T("Speicherordner"), folder);
             var fmt = new Segmented(new[] { "auto", "png", "jpg", "webp" }, new[] { "Auto", "PNG", "JPEG", "WebP" }, s.Format, 230);
-            fmt.Changed = () => s.Format = fmt.Value;
             p.AddRow(L.T("Dateiformat"), fmt);
             var quality = new Slider(10, 100, 5, s.JpegQuality, 230);
             quality.Changed = () => s.JpegQuality = quality.Value;
             p.AddRow(L.T("JPEG-Qualität"), quality);
+            quality.Enabled = s.Format == "auto" || s.Format == "jpg"; // auto can pick JPEG
+            fmt.Changed = () => { s.Format = fmt.Value; quality.Enabled = fmt.Value == "auto" || fmt.Value == "jpg"; };
             var scale = new Segmented(new[] { "100", "75", "50", "25" }, new[] { "100 %", "75 %", "50 %", "25 %" }, s.OutputScale.ToString(), 230);
             scale.Changed = () => s.OutputScale = int.Parse(scale.Value);
             p.AddRow(L.T("Ausgabegröße"), scale);
-            p.AddBlock(L.T("Dateiname beim Speichern"), new FileNameEditor(s.FileNameSave, false, ".png", v => s.FileNameSave = v), 158);
-            p.AddBlock(L.T("Dateiname beim Hochladen"), new FileNameEditor(s.FileNameUpload, true, ".png", v => s.FileNameUpload = v), 158);
+            p.AddBlock(L.T("Dateiname beim Speichern"), new FileNameEditor(s.FileNameSave, false, ".png", v => s.FileNameSave = v), 104);
+            p.AddBlock(L.T("Dateiname beim Hochladen"), new FileNameEditor(s.FileNameUpload, true, ".png", v => s.FileNameUpload = v), 104);
+            p.AddBlock(L.T("Variablen"), new FileNameVars(), 124);
 
             uploadPage = NewPage("Upload", size, L.T("Der Schalter wählt das aktive Ziel, Hotkeys laden direkt hoch."));
             BuildUploadPage();
@@ -220,8 +223,6 @@ namespace Glint
                 on.Changed = () => { s.ActiveDestination = d.Id; s.Save(); BeginInvoke(new Action(BuildUploadPage)); };
                 var rec = new KeyRecorder(d.Hotkey) { Width = Ui.S(118), Height = Ui.S(28) };
                 rec.Recorded = () => { d.Hotkey = rec.Value; s.Save(); };
-                var clear = new IconButton("x", 24);
-                clear.Changed = () => { rec.Value = ""; d.Hotkey = ""; s.Save(); };
                 var edit = new IconButton("pencil", 24);
                 edit.Changed = () =>
                 {
@@ -242,7 +243,7 @@ namespace Glint
                     s.Save();
                     BeginInvoke(new Action(BuildUploadPage));
                 };
-                uploadPage.AddRow(d.Name + "  ·  " + d.TypeName, rec, clear, edit, del, on);
+                uploadPage.AddRow(d.Name + "  ·  " + d.TypeName, rec, edit, del, on);
             }
             var names = new[] { "Zipline", "R2", "S3", "Discord", L.T("Eigene"), "ShareX" };
             var types = new[] { "zipline", "r2", "s3", "discord", "custom", "sharex" };
@@ -287,12 +288,11 @@ namespace Glint
             rec.Recorded = () =>
             {
                 // One key, one action per group.
+                if (rec.Value == "") return;
                 foreach (var other in group.Values) if (other != rec && other.Value == rec.Value) other.Value = "";
             };
-            var clear = new IconButton("x", 24);
-            clear.Changed = () => rec.Value = "";
             group[key] = rec;
-            page.AddRow(label, rec, clear);
+            page.AddRow(label, rec);
         }
 
         public void SelectPage(int i)

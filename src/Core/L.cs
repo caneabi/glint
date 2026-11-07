@@ -240,6 +240,7 @@ namespace Glint
             {"Beschreibung", "Description"},
             {"Footer-Icon (URL)", "Footer icon (URL)"},
             {"Variablen: ", "Variables: "},
+            {"Variablen", "Variables"},
             {"Update-Kanal", "Update channel"},
             {"Sprache", "Language"},
             {"Tray-Symbol anzeigen", "Show tray icon"},
