@@ -41,6 +41,50 @@ namespace Glint
         {
             using (var p = Renderer.Round(r, d)) using (var b = new SolidBrush(c)) g.FillPath(b, p);
         }
+        static readonly System.Collections.Generic.Dictionary<long, Bitmap> Discs = new System.Collections.Generic.Dictionary<long, Bitmap>();
+
+        // GDI+ antialiasing isn't symmetric, these circles are sampled by hand. Position and size in device pixels.
+        public static void Disc(Graphics g, int x, int y, int d, Color c)
+        {
+            if (d <= 0) return;
+            long key = ((long)d << 32) | (uint)c.ToArgb();
+            Bitmap b;
+            if (!Discs.TryGetValue(key, out b))
+            {
+                const int N = 8;
+                b = new Bitmap(d, d, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+                float r = d / 2f;
+                for (int py = 0; py < d; py++)
+                    for (int px = 0; px < d; px++)
+                    {
+                        int hits = 0;
+                        for (int sy = 0; sy < N; sy++)
+                            for (int sx = 0; sx < N; sx++)
+                            {
+                                float dx = px + (sx + .5f) / N - r, dy = py + (sy + .5f) / N - r;
+                                if (dx * dx + dy * dy <= r * r) hits++;
+                            }
+                        b.SetPixel(px, py, Color.FromArgb(c.A * hits / (N * N), c));
+                    }
+                Discs[key] = b;
+            }
+            var state = g.Save();
+            g.ResetTransform();
+            g.InterpolationMode = InterpolationMode.NearestNeighbor;
+            g.DrawImage(b, new Rectangle(x, y, d, d));
+            g.Restore(state);
+        }
+
+        // Crisp rectangle in device pixels.
+        public static void Block(Graphics g, int x, int y, int w, int h, Color c)
+        {
+            var state = g.Save();
+            g.ResetTransform();
+            g.SmoothingMode = SmoothingMode.None;
+            using (var b = new SolidBrush(c)) g.FillRectangle(b, x, y, w, h);
+            g.Restore(state);
+        }
+
         // No AA, it would smear over two pixels.
         public static void Hairline(Graphics g, int x1, int y1, int x2, int y2)
         {
