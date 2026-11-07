@@ -37,6 +37,10 @@ namespace Glint
         Color? picked, prevPicked;
         int rulerAxis; TextBox editor; Obj editing; bool editingNew;
         string statusNote = "";
+        readonly Dictionary<string, ButtonFx> fx = new Dictionary<string, ButtonFx>();
+        Timer fxTimer;
+        string note;
+        DateTime noteUntil;
 
         public Editor(Bitmap img)
         {
@@ -443,8 +447,90 @@ namespace Glint
             if (rulerAxis != 1) one(false);
         }
 
+        // Results show up on the button and in a chip, not in a toast at the bottom.
+        void Effect(string id, ButtonFx.State state, string message = null)
+        {
+            fx[id] = new ButtonFx(state);
+            if (message != null) Note(message, state == ButtonFx.State.Fail ? 4000 : 2500);
+            StartFxTimer();
+        }
+
+        void Note(string text, int ms)
+        {
+            note = text; noteUntil = DateTime.Now.AddMilliseconds(ms);
+            StartFxTimer();
+        }
+
+        void StartFxTimer()
+        {
+            if (fxTimer == null)
+            {
+                fxTimer = new Timer { Interval = 16 };
+                fxTimer.Tick += delegate
+                {
+                    foreach (var id in fx.Where(p => p.Value.Finished).Select(p => p.Key).ToList()) fx.Remove(id);
+                    if (note != null && DateTime.Now > noteUntil) note = null;
+                    if (fx.Count == 0 && note == null) fxTimer.Stop();
+                    Invalidate(new Rectangle(0, 0, ClientSize.Width, BarH + 120));
+                };
+            }
+            fxTimer.Start();
+        }
+
+        void DrawEffects(Graphics g)
+        {
+            foreach (var p in fx)
+            {
+                var b = buttons.FirstOrDefault(x => x.Id == p.Key);
+                if (b == null || b.R.IsEmpty || (b.R.Y >= BarH && !moreOpen)) continue;
+                p.Value.Draw(g, b.R.X + b.R.Width / 2f, b.R.Y + b.R.Height / 2f);
+            }
+            if (note != null) Glint.Chip.Draw(g, note, new Rectangle(ClientSize.Width / 2 - 320, BarH + 10, 640, 28));
+        }
+
+        bool Busy(string id) { ButtonFx f; return fx.TryGetValue(id, out f) && f.Kind == ButtonFx.State.Busy; }
+
+        async void RunOcr()
+        {
+            if (Busy("ocr")) return;
+            Effect("ocr", ButtonFx.State.Busy);
+            try
+            {
+                string text;
+                using (var x = Export()) text = await Tray.OcrCopy(x);
+                if (IsDisposed) return;
+                if (text == "") Effect("ocr", ButtonFx.State.Fail, L.T("Kein Text gefunden"));
+                else Effect("ocr", ButtonFx.State.Done);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("OCR", ex);
+                if (!IsDisposed) Effect("ocr", ButtonFx.State.Fail, L.T("Texterkennung fehlgeschlagen"));
+            }
+        }
+
+        async void RunUpload(Destination d)
+        {
+            if (Busy("upload")) return;
+            if (d == null) { Effect("upload", ButtonFx.State.Fail, L.T("Kein Upload-Ziel eingerichtet")); return; }
+            Effect("upload", ButtonFx.State.Busy);
+            try
+            {
+                bool copied;
+                using (var x = Export()) copied = await Uploader.Upload(x, d);
+                if (!IsDisposed) Effect("upload", ButtonFx.State.Done, copied ? null : L.T("Hochgeladen, Link steht im Log"));
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Upload nach " + d.Name + " (" + d.TypeName + ")", ex);
+                if (!IsDisposed) Effect("upload", ButtonFx.State.Fail, L.T("Upload fehlgeschlagen"));
+            }
+        }
+
         void DrawButton(Graphics g, Btn b)
         {
+            ButtonFx running;
+            if (fx.TryGetValue(b.Id, out running) && running.HidesIcon) return;
             float cx = b.R.X + b.R.Width / 2f, cy = b.R.Y + b.R.Height / 2f;
             var c = Color.FromArgb(232, 232, 235);
             switch (b.Id)
@@ -565,6 +651,7 @@ namespace Glint
                 var parts = hover.Tip.Split(new[] { "  " }, StringSplitOptions.None);
                 Glint.Chip.Draw(g, parts[0], area, parts.Length > 1 ? parts[1] : null);
             }
+            DrawEffects(g);
         }
 
         void PushUndo()
@@ -622,7 +709,7 @@ namespace Glint
             if (e.Button == MouseButtons.Left && closeR.Contains(e.Location)) { Close(); return; }
             if (e.Button == MouseButtons.Left && minR.Contains(e.Location)) { WindowState = FormWindowState.Minimized; return; }
             var hit = HitBtn(e.Location);
-            if (hit != null && hit.Id == "upload" && e.Button == MouseButtons.Right) { Uploader.ShowMenu(Export, true); return; }
+            if (hit != null && hit.Id == "upload" && e.Button == MouseButtons.Right) { Uploader.ShowMenu(RunUpload); return; }
             if (hit != null && e.Button == MouseButtons.Left)
             {
                 if (hit.Id == "drag") { DragOut(); return; }
@@ -841,10 +928,10 @@ namespace Glint
                 case "undo": Restore(undo, redo); break;
                 case "redo": Restore(redo, undo); break;
                 case "backdrop": backdrop = backdrop + 1 >= Renderer.Gradients.Length ? -1 : backdrop + 1; Recompose(); break;
-                case "ocr": using (var x = Export()) Tray.Instance.OcrAndCopy(Imaging.Crop(x, new Rectangle(0, 0, x.Width, x.Height))); break;
+                case "ocr": RunOcr(); break;
                 case "addcap": AddCapture(); break;
                 case "pin": new PinWindow(Export()).Show(); break;
-                case "upload": using (var x = Export()) Uploader.RunActive(x); break;
+                case "upload": RunUpload(Uploader.Active); break;
                 case "save": Save(); break;
                 case "copy": CopyImage(); break;
                 case "cc":
@@ -882,8 +969,16 @@ namespace Glint
 
         void CopyImage()
         {
-            using (var b = Export()) Imaging.Copy(b);
-            Toast.Show(L.T("In die Zwischenablage kopiert"));
+            try
+            {
+                using (var b = Export()) Imaging.Copy(b);
+                Effect("copy", ButtonFx.State.Done);
+            }
+            catch (Exception ex)
+            {
+                Log.Error("Kopieren", ex);
+                Effect("copy", ButtonFx.State.Fail, L.T("Kopieren fehlgeschlagen"));
+            }
         }
 
         void Save()
@@ -893,10 +988,14 @@ namespace Glint
                 using (var b = Export())
                 {
                     var f = Imaging.QuickSave(b);
-                    Toast.Show(L.T("Gespeichert: ") + Path.GetFileName(f));
+                    Effect("save", ButtonFx.State.Done, L.T("Gespeichert: ") + Path.GetFileName(f));
                 }
             }
-            catch (Exception ex) { Toast.Error(L.T("Speichern fehlgeschlagen"), L.T("Speichern"), ex); }
+            catch (Exception ex)
+            {
+                Log.Error("Speichern", ex);
+                Effect("save", ButtonFx.State.Fail, L.T("Speichern fehlgeschlagen"));
+            }
         }
 
         void SaveAs()
@@ -972,6 +1071,7 @@ namespace Glint
                 foreach (var o in Objs) owned.Add(o.Img);
                 foreach (var b in owned) if (b != null) b.Dispose();
                 undo.Clear(); redo.Clear();
+                if (fxTimer != null) fxTimer.Dispose();
             }
             base.Dispose(d);
         }
@@ -994,7 +1094,7 @@ namespace Glint
             statusNote = L.T("Kopiert: ") + t;
             if (prevPicked.HasValue)
                 statusNote += string.Format(L.T("   ·   Kontrast zu {0}: {1:0.00}:1 (WCAG)   Lc {2:0} (APCA)"), Colors.Hex(prevPicked.Value), Colors.Wcag(c, prevPicked.Value), Colors.Apca(c, prevPicked.Value));
-            Toast.Show(statusNote, prevPicked.HasValue ? 3500 : 1600);
+            Note(statusNote, prevPicked.HasValue ? 3500 : 1600);
             Invalidate();
         }
 
@@ -1028,8 +1128,8 @@ namespace Glint
                     case Keys.Z: if (shift) Restore(redo, undo); else Restore(undo, redo); return true;
                     case Keys.Y: Restore(redo, undo); return true;
                     case Keys.P: new PinWindow(Export()).Show(); return true;
-                    case Keys.U: Uploader.RunActive(Export()); return true;
-                    case Keys.T: using (var x = Export()) Tray.Instance.OcrAndCopy(Imaging.Crop(x, new Rectangle(0, 0, x.Width, x.Height))); return true;
+                    case Keys.U: RunUpload(Uploader.Active); return true;
+                    case Keys.T: RunOcr(); return true;
                     case Keys.O: Tray.Instance.OpenFile(); return true;
                     case Keys.Oemplus: case Keys.Add: Zoom(1.25f); return true;
                     case Keys.OemMinus: case Keys.Subtract: Zoom(.8f); return true;
@@ -1057,7 +1157,7 @@ namespace Glint
                 case Keys.F:
                     var s = Settings.Current;
                     s.ColorFormat = s.ColorFormat == "hex" ? "rgb" : s.ColorFormat == "rgb" ? "oklch" : "hex";
-                    s.Save(); Toast.Show(L.T("Farbformat: ") + s.ColorFormat.ToUpper()); return true;
+                    s.Save(); Note(L.T("Farbformat: ") + s.ColorFormat.ToUpper(), 1600); return true;
             }
             if (tool == Tool.Crop && crop.HasValue)
             {
@@ -1081,7 +1181,7 @@ namespace Glint
         {
             foreach (var f in (string[])e.Data.GetData(DataFormats.FileDrop))
                 try { AddImage(Imaging.Load(f)); }
-                catch (Exception ex) { Toast.Error(L.T("Keine gültige Bilddatei"), "Einfügen von " + f, ex); }
+                catch (Exception ex) { Log.Error("Einfügen von " + f, ex); Note(L.T("Keine gültige Bilddatei"), 4000); }
         }
 
         public Tool CurrentTool { get { return tool; } }

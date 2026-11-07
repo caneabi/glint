@@ -261,13 +261,21 @@ namespace Glint
         }
 
         // Takes ownership of the bitmap.
+        // Returns what was recognized and copied, empty when nothing was found.
+        public static async Task<string> OcrCopy(Bitmap b)
+        {
+            string text = await Ocr.Recognize(b);
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            Clipboard.SetText(text);
+            return text;
+        }
+
         public async void OcrAndCopy(Bitmap b)
         {
             try
             {
-                string text = await Ocr.Recognize(b);
-                if (string.IsNullOrWhiteSpace(text)) { Toast.Show(L.T("Kein Text gefunden")); return; }
-                Clipboard.SetText(text);
+                string text = await OcrCopy(b);
+                if (text == "") { Toast.Show(L.T("Kein Text gefunden")); return; }
                 Toast.Show(L.T("Text kopiert: ") + (text.Length > 48 ? text.Substring(0, 48) + "…" : text));
             }
             catch (Exception ex) { Toast.Error(L.T("Texterkennung fehlgeschlagen"), "OCR", ex); }

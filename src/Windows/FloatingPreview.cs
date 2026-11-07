@@ -226,7 +226,7 @@ namespace Glint
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Right && rects[Array.IndexOf(Ids, "upload")].Contains(e.Location)) { Uploader.ShowMenu(() => img); return; }
+            if (e.Button == MouseButtons.Right && rects[Array.IndexOf(Ids, "upload")].Contains(e.Location)) { Uploader.ShowMenu(d => Uploader.Run(img, d)); return; }
             if (e.Button != MouseButtons.Left) return;
             if (inside && closeRect.Contains(e.Location)) { Close(); return; }
             if (dragRect.Contains(e.Location) || ((ModifierKeys & Keys.Control) != 0 && imgRect.Contains(e.Location))) { dragFrom = e.Location; return; }
