@@ -34,6 +34,7 @@ namespace Glint
         public static void Prepare(Graphics g)
         {
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.Half; // otherwise shapes sit half a pixel up and left
             g.TextRenderingHint = TextRenderingHint.ClearTypeGridFit;
         }
         public static void Pill(Graphics g, RectangleF r, Color c, float d)

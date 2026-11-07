@@ -101,7 +101,7 @@ namespace Glint
             if (needBackdrop) GrabBackdrop();
             using (var bmp = new Bitmap(Width, Height, PixelFormat.Format32bppArgb))
             {
-                using (var g = Graphics.FromImage(bmp)) PaintTo(g);
+                using (var g = Graphics.FromImage(bmp)) { g.PixelOffsetMode = PixelOffsetMode.Half; PaintTo(g); }
                 IntPtr hb = bmp.GetHbitmap(Color.FromArgb(0)), dc = Native.CreateCompatibleDC(IntPtr.Zero), old = Native.SelectObject(dc, hb);
                 var pos = Location; var size = Size; var src = Point.Empty;
                 var blend = new Native.BLENDFUNCTION { Alpha = 255, Format = 1 };

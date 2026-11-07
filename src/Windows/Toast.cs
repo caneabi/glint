@@ -50,6 +50,7 @@ namespace Glint
         {
             var g = e.Graphics;
             g.SmoothingMode = SmoothingMode.AntiAlias;
+            g.PixelOffsetMode = PixelOffsetMode.Half;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.ClearTypeGridFit;
             int x = 35;
             if (!isError) Brand.DrawMark(g, new Rectangle(13, 12, 14, 14), Color.FromArgb(232, 232, 235), Brand.Pixel);

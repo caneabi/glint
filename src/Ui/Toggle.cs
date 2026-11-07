@@ -12,9 +12,10 @@ namespace Glint
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = Begin(e);
-            Ui.Pill(g, new RectangleF(0, 0, LW - 1, LH - 1), On ? Ui.Accent : Ui.Well, LH - 1);
-            float x = On ? LW - LH + 2 : 2;
-            g.FillEllipse(Brushes.White, x, 2, LH - 5, LH - 5);
+            Ui.Pill(g, new RectangleF(0, 0, LW, LH), On ? Ui.Accent : Ui.Well, LH);
+            float m = Ui.S(2) / Ui.F; // whole pixels keep the knob centered at any scale
+            float x = On ? LW - LH + m : m;
+            g.FillEllipse(Brushes.White, x, m, LH - m * 2, LH - m * 2);
         }
     }
 }
