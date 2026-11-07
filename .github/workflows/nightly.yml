@@ -1,0 +1,46 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  nightly:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: nightly
+      - name: Skip if nothing changed
+        id: check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $full = git rev-parse HEAD
+          $sha = $full.Substring(0, 7)
+          $title = gh release view nightly --json name --jq .name 2>$null
+          $LASTEXITCODE = 0
+          "sha=$sha" >> $env:GITHUB_OUTPUT
+          "full=$full" >> $env:GITHUB_OUTPUT
+          "skip=$($title -eq "Nightly $sha")".ToLower() >> $env:GITHUB_OUTPUT
+      - name: Build
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        run: |
+          dotnet build Glint.csproj -c Release
+          Copy-Item bin/Release/net48/Glint.exe Glint.exe
+          (Get-FileHash Glint.exe -Algorithm SHA256).Hash.ToLower() + "  Glint.exe" | Out-File -Encoding ascii Glint.exe.sha256
+      - name: Publish
+        if: steps.check.outputs.skip != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --cleanup-tag --yes 2>$null
+          $LASTEXITCODE = 0
+          gh release create nightly Glint.exe Glint.exe.sha256 --prerelease --target "${{ steps.check.outputs.full }}" --title "Nightly ${{ steps.check.outputs.sha }}" --notes "Built from ${{ steps.check.outputs.full }}. Can break."

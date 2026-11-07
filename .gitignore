@@ -1,0 +1,61 @@
+# Build output
+bin/
+obj/
+publish/
+*.exe
+*.pdb
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+
+# Local only
+tests/
+
+# Local tooling and assistants
+.claude/
+.claude-plugin/
+.codex/
+.cursor/
+.cursor-plugin/
+.cursorrules
+.windsurf/
+.windsurfrules
+.aider*
+.continue/
+.copilot/
+.gemini/
+.grok/
+.agent/
+.agents/
+.devin/
+.kiro/
+.opencode/
+.qoder/
+.rovodev/
+.roo/
+.trae/
+.trae-cn/
+.cline/
+.clinerules
+.impeccable/
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+PRODUCT.md
+DESIGN.md
+.mcp.json
+
+# Secrets and local data
+.env
+.env.*
+*.pem
+*.pfx
+settings.ini
+*.log
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store

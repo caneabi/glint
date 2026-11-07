@@ -1,0 +1,36 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>Glint</AssemblyName>
+    <Version>1.0.0</Version>
+    <ApplicationIcon Condition="Exists('assets\glint.ico')">assets\glint.ico</ApplicationIcon>
+    <RootNamespace>Glint</RootNamespace>
+    <Configurations>Debug;Release;Test</Configurations>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <PlatformTarget>x64</PlatformTarget>
+    <DebugType>none</DebugType>
+    <Optimize Condition="'$(Configuration)' != 'Debug'">true</Optimize>
+    <DefineConstants Condition="'$(Configuration)' == 'Test'">$(DefineConstants);SELFTEST</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="src\**\*.cs" />
+    <Compile Include="tests\**\*.cs" Condition="'$(Configuration)' == 'Test'" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Security" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="PresentationCore" />
+    <Reference Include="WindowsBase" />
+    <Reference Include="System.Xaml" />
+    <Reference Include="System.Runtime" />
+    <Reference Include="Windows.Foundation"><HintPath>$(WINDIR)\System32\WinMetadata\Windows.Foundation.winmd</HintPath><Private>false</Private></Reference>
+    <Reference Include="Windows.Globalization"><HintPath>$(WINDIR)\System32\WinMetadata\Windows.Globalization.winmd</HintPath><Private>false</Private></Reference>
+    <Reference Include="Windows.Graphics"><HintPath>$(WINDIR)\System32\WinMetadata\Windows.Graphics.winmd</HintPath><Private>false</Private></Reference>
+    <Reference Include="Windows.Media"><HintPath>$(WINDIR)\System32\WinMetadata\Windows.Media.winmd</HintPath><Private>false</Private></Reference>
+    <Reference Include="Windows.Storage"><HintPath>$(WINDIR)\System32\WinMetadata\Windows.Storage.winmd</HintPath><Private>false</Private></Reference>
+  </ItemGroup>
+</Project>
