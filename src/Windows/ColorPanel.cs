@@ -175,6 +175,10 @@ namespace Glint
             Sounds.Play(Sounds.Kind.Copy);
             copiedRow = i; copiedTimer.Stop(); copiedTimer.Start();
             Invalidate();
+            // Copying is the last step, the check shows briefly before the panel goes.
+            var close = new Timer { Interval = 220 };
+            close.Tick += delegate { close.Dispose(); if (!IsDisposed) Close(); };
+            close.Start();
         }
 
         void PickAgain()
@@ -197,7 +201,6 @@ namespace Glint
                 switch (p.Key)
                 {
                     case "copy": CopyRow(standard); break;
-                    case "copyClose": CopyRow(standard); Close(); break;
                     case "close": Close(); break;
                     case "pick": PickAgain(); break;
                     case "swap": var t = slots[0]; slots[0] = slots[1]; slots[1] = t; Invalidate(); break;

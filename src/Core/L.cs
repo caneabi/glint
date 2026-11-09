@@ -257,7 +257,6 @@ namespace Glint
             {"Nur kopieren", "Copy only"},
             {"Farbwähler", "Color picker"},
             {"Farbpanel: Kopieren", "Color panel: Copy"},
-            {"Farbpanel: Kopieren und schließen", "Color panel: Copy and close"},
             {"Farbpanel: Schließen", "Color panel: Close"},
             {"Farbpanel: Neue Farbe", "Color panel: New color"},
             {"Farbpanel: Tauschen", "Color panel: Swap"},
