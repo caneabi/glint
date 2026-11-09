@@ -71,6 +71,8 @@ namespace Glint
                 Present(new Rectangle(0, 0, virt.Width, virt.Height));
             }
             Activate();
+            Native.ForceForeground(Handle);
+            Focus();
         }
 
         void Present(Rectangle clip)
@@ -119,16 +121,43 @@ namespace Glint
             return new Rectangle(x, y, Loupe, h);
         }
 
+        static readonly Font HintFont = new Font("Segoe UI", 8.5f), KeyFont = new Font("Segoe UI Semibold", 8f);
+        static readonly Bitmap Measure = new Bitmap(1, 1);
+        const int HintH = 34, HintPad = 10, CapH = 20, CapGap = 6, ItemGap = 14;
+
+        // Key, label, whether it's switched on.
+        List<Tuple<string, string, bool>> HintItems()
+        {
+            var items = new List<Tuple<string, string, bool>> {
+                Tuple.Create("Esc", L.T("Abbrechen"), false),
+                Tuple.Create("W", "Snap", snap),
+                Tuple.Create("C", L.T("Fadenkreuz"), Settings.Current.Crosshair),
+                Tuple.Create("Tab", L.T("Farbe kopieren"), false) };
+            if (dragging) items.Insert(1, Tuple.Create(L.T("Leertaste"), L.T("Verschieben"), moving));
+            return items;
+        }
+
+        int HintWidth(List<Tuple<string, string, bool>> items)
+        {
+            using (var g = Graphics.FromImage(Measure))
+            {
+                float w = HintPad * 2 - ItemGap;
+                foreach (var i in items) w += g.MeasureString(i.Item1, KeyFont).Width + 10 + CapGap + g.MeasureString(i.Item2, HintFont).Width + ItemGap;
+                return (int)Math.Ceiling(w);
+            }
+        }
+
         Rectangle HintRect()
         {
             var b = Screen.FromPoint(new Point(cur.X + virt.X, cur.Y + virt.Y)).Bounds;
-            return new Rectangle(b.X - virt.X + (b.Width - 620) / 2, b.Y - virt.Y + 18, 620, 34);
+            int w = HintWidth(HintItems());
+            return new Rectangle(b.X - virt.X + (b.Width - w) / 2, b.Y - virt.Y + 18, w, HintH);
         }
 
         void Update2()
         {
             var r = Highlight();
-            var next = Rectangle.Union(Rectangle.Inflate(LoupeRect(), 2, 2), HintRect());
+            var next = Rectangle.Union(Rectangle.Inflate(LoupeRect(), 2, 2), Rectangle.Inflate(HintRect(), 40, 0)); // width changes with the items
             if (!r.IsEmpty) next = Rectangle.Union(next, Rectangle.Inflate(r, 6, 6));
             if (!r.IsEmpty) next = Rectangle.Union(next, new Rectangle(r.X - 2, r.Y - 34, 190, 34));
             if (Settings.Current.Crosshair)
@@ -242,12 +271,22 @@ namespace Glint
         {
             var r = HintRect();
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = Renderer.Round(r, 20)) using (var b = new SolidBrush(Color.FromArgb(225, 28, 28, 28))) g.FillPath(b, path);
-            g.SmoothingMode = SmoothingMode.None;
-            string s = L.T("Ziehen: Bereich  ·  Klick: Fenster  ·  W: Snap ") + (snap ? L.T("an") : L.T("aus")) + L.T("  ·  C: Fadenkreuz  ·  Leertaste: verschieben  ·  Tab: Farbe  ·  Esc");
-            using (var f = new Font("Segoe UI", 8.5f))
+            using (var path = Renderer.Round(r, HintH)) using (var b = new SolidBrush(Color.FromArgb(225, 28, 28, 28))) g.FillPath(b, path);
+            float x = r.X + HintPad, capY = r.Y + (HintH - CapH) / 2f;
             using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                g.DrawString(s, f, Brushes.Gainsboro, r, sf);
+            using (var left = new StringFormat { LineAlignment = StringAlignment.Center })
+                foreach (var i in HintItems())
+                {
+                    // Lit keycaps show what's switched on.
+                    float cw = g.MeasureString(i.Item1, KeyFont).Width + 10;
+                    var cap = new RectangleF(x, capY, cw, CapH);
+                    using (var path = Renderer.Round(cap, 8)) using (var b = new SolidBrush(i.Item3 ? Accent : Color.FromArgb(68, 68, 74))) g.FillPath(b, path);
+                    g.DrawString(i.Item1, KeyFont, i.Item3 ? Brushes.Black : Brushes.White, cap, sf);
+                    x += cw + CapGap;
+                    float lw = g.MeasureString(i.Item2, HintFont).Width;
+                    using (var b = new SolidBrush(Color.FromArgb(200, 200, 205))) g.DrawString(i.Item2, HintFont, b, new RectangleF(x, r.Y, lw + 2, HintH), left);
+                    x += lw + ItemGap;
+                }
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
@@ -317,10 +356,10 @@ namespace Glint
                 dirty = new Rectangle(0, 0, Width, Height);
                 Update2();
             }
-            else if (e.KeyCode == Keys.Space && dragging && !moving) { moving = true; moveFrom = cur; }
+            else if (e.KeyCode == Keys.Space && dragging && !moving) { moving = true; moveFrom = cur; Update2(); }
         }
 
-        protected override void OnKeyUp(KeyEventArgs e) { if (e.KeyCode == Keys.Space) moving = false; }
+        protected override void OnKeyUp(KeyEventArgs e) { if (e.KeyCode == Keys.Space) { moving = false; Update2(); } }
 
         protected override bool ProcessCmdKey(ref Message m, Keys k)
         {

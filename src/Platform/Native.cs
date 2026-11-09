@@ -41,6 +41,20 @@ namespace Glint
         [DllImport("user32")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
         [DllImport("user32", CharSet = CharSet.Unicode)] public static extern int GetClassName(IntPtr h, StringBuilder s, int n);
         [DllImport("user32")] public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);
+        [DllImport("user32")] static extern bool AttachThreadInput(uint from, uint to, bool attach);
+        [DllImport("user32")] static extern bool SetForegroundWindow(IntPtr h);
+        [DllImport("user32")] static extern bool BringWindowToTop(IntPtr h);
+        [DllImport("kernel32")] static extern uint GetCurrentThreadId();
+
+        // A hotkey from the keyboard hook doesn't grant focus, so borrow the foreground thread's input.
+        public static void ForceForeground(IntPtr h)
+        {
+            uint pid, other = GetWindowThreadProcessId(GetForegroundWindow(), out pid), me = GetCurrentThreadId();
+            bool attached = other != 0 && other != me && AttachThreadInput(me, other, true);
+            BringWindowToTop(h);
+            SetForegroundWindow(h);
+            if (attached) AttachThreadInput(me, other, false);
+        }
         [DllImport("user32", EntryPoint = "GetWindowLongW")] public static extern int GetWindowLong(IntPtr h, int i);
         public delegate IntPtr HookProc(int code, IntPtr w, IntPtr l);
         [DllImport("user32")] public static extern IntPtr SetWindowsHookEx(int id, HookProc p, IntPtr mod, uint thread);
