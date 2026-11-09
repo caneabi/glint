@@ -51,7 +51,8 @@ namespace Glint
             FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true;
             StartPosition = FormStartPosition.Manual; Bounds = virt;
             KeyPreview = true; Cursor = Cursors.Cross;
-            SetStyle(ControlStyles.Opaque | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            // No WinForms double buffer: for a window this big it allocates a new buffer on every paint.
+            SetStyle(ControlStyles.Opaque | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
             cur = new Point(Cursor.Position.X - virt.X, Cursor.Position.Y - virt.Y);
         }
 
@@ -64,29 +65,34 @@ namespace Glint
         {
             base.OnShown(e);
             Native.SetWindowPos(Handle, new IntPtr(-1), virt.X, virt.Y, virt.Width, virt.Height, 0x40);
+            // One lasting back buffer, frames only redraw and copy what changed.
+            var info = new Native.BITMAPINFO { Size = 40, Width = virt.Width, Height = -virt.Height, Planes = 1, BitCount = 32 };
+            memDc = Native.CreateCompatibleDC(IntPtr.Zero);
+            dib = Native.CreateDIBSection(memDc, ref info, 0, out bits, IntPtr.Zero, 0);
+            oldBmp = Native.SelectObject(memDc, dib);
+            buffer = new Bitmap(virt.Width, virt.Height, virt.Width * 4, PixelFormat.Format32bppPArgb, bits);
             if (!frozen)
             {
                 Native.SetWindowDisplayAffinity(Handle, 0x11); // WDA_EXCLUDEFROMCAPTURE
-                var info = new Native.BITMAPINFO { Size = 40, Width = virt.Width, Height = -virt.Height, Planes = 1, BitCount = 32 };
-                memDc = Native.CreateCompatibleDC(IntPtr.Zero);
-                dib = Native.CreateDIBSection(memDc, ref info, 0, out bits, IntPtr.Zero, 0);
-                oldBmp = Native.SelectObject(memDc, dib);
-                buffer = new Bitmap(virt.Width, virt.Height, virt.Width * 4, PixelFormat.Format32bppPArgb, bits);
-                Present(new Rectangle(0, 0, virt.Width, virt.Height));
+                Present(new Rectangle(0, 0, virt.Width, virt.Height), true);
             }
+            else Invalidate();
             if (picker) { Cursor.Hide(); cursorHidden = true; } // the loupe is the cursor
             Activate();
             Native.ForceForeground(Handle);
             Focus();
         }
 
-        void Present(Rectangle clip)
+        void Present(Rectangle clip, bool full = false)
         {
+            clip.Intersect(new Rectangle(0, 0, virt.Width, virt.Height));
+            if (clip.Width <= 0 || clip.Height <= 0) return;
             using (var g = Graphics.FromImage(buffer))
             {
                 g.SetClip(clip);
                 DrawScene(g, clip);
             }
+            if (!full && Native.UpdateLayeredDirty(Handle, memDc, clip)) return;
             var size = new Size(virt.Width, virt.Height); var src = Point.Empty; var pos = virt.Location;
             var blend = new Native.BLENDFUNCTION { Op = 0, Alpha = 255, Format = 1 };
             Native.UpdateLayeredWindow(Handle, IntPtr.Zero, ref pos, ref size, memDc, ref src, 0, ref blend, 2);
@@ -188,7 +194,18 @@ namespace Glint
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            if (frozen) DrawScene(e.Graphics, e.ClipRectangle);
+            if (!frozen) return;
+            var clip = e.ClipRectangle;
+            clip.Intersect(new Rectangle(0, 0, virt.Width, virt.Height));
+            if (buffer == null || clip.Width <= 0 || clip.Height <= 0) { DrawScene(e.Graphics, e.ClipRectangle); return; }
+            using (var g = Graphics.FromImage(buffer))
+            {
+                g.SetClip(clip);
+                DrawScene(g, clip);
+            }
+            IntPtr hdc = e.Graphics.GetHdc();
+            Native.BitBlt(hdc, clip.X, clip.Y, clip.Width, clip.Height, memDc, clip.X, clip.Y, 0x00CC0020);
+            e.Graphics.ReleaseHdc(hdc);
         }
 
         void DrawScene(Graphics g, Rectangle clip)
@@ -495,6 +512,18 @@ namespace Glint
             g.SetClip(clip);
             DrawScene(g, clip);
             dragging = false;
+        }
+
+        // Test hook: moves the mouse and waits for the frame like a real move would.
+        public double TestMoves(int count)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < count; i++)
+            {
+                OnMouseMove(new MouseEventArgs(MouseButtons.None, 0, 200 + (i % 2) * 900 + i * 7, 300 + (i % 3) * 250, 0));
+                Update();
+            }
+            return sw.Elapsed.TotalMilliseconds / count;
         }
 
         public void Simulate(Point a, Point b)
