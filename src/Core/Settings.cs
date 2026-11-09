@@ -39,7 +39,8 @@ namespace Glint
         public Dictionary<string, string> PreviewKeys = new Dictionary<string, string> {
             {"copy","Escape"},{"edit","Return"},{"pin","Ctrl+P"},{"save","Ctrl+S"},{"upload","Ctrl+U"},{"ocr","Ctrl+T"},{"close","Delete"}};
         public string Format = "auto"; // auto | png | jpg | webp
-        public string ColorFormat = "hex"; // hex | rgb | oklch
+        public string ColorFormat = "hex"; // one of Colors.Formats
+        public string ColorAfter = "panel"; // panel | copy
         public int MaxScroll = 20000;
         public List<string> ColorHistory = new List<string>();
         public static Settings Current = new Settings();
@@ -99,6 +100,7 @@ namespace Glint
                     else if (k == "after") Current.After = v;
                     else if (k == "format") Current.Format = v;
                     else if (k == "colorFormat") Current.ColorFormat = v;
+                    else if (k == "colorAfter") Current.ColorAfter = v == "copy" ? "copy" : "panel";
                     else if (k == "maxScroll") int.TryParse(v, out Current.MaxScroll);
                     else if (k == "colorHistory") Current.ColorHistory = v.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToList();
                 }
@@ -136,7 +138,7 @@ namespace Glint
             foreach (var p in PreviewKeys) sb.AppendLine("preview." + p.Key + "=" + p.Value);
             sb.AppendLine("snap=" + (Snap ? "1" : "0")).AppendLine("freeze=" + (Freeze ? "1" : "0")).AppendLine("crosshair=" + (Crosshair ? "1" : "0"));
             sb.AppendLine("saveDir=" + SaveDir).AppendLine("after=" + After).AppendLine("format=" + Format)
-              .AppendLine("colorFormat=" + ColorFormat).AppendLine("maxScroll=" + MaxScroll).AppendLine("colorHistory=" + string.Join(",", ColorHistory)).AppendLine("jpegQuality=" + JpegQuality).AppendLine("outputScale=" + OutputScale);
+              .AppendLine("colorFormat=" + ColorFormat).AppendLine("colorAfter=" + ColorAfter).AppendLine("maxScroll=" + MaxScroll).AppendLine("colorHistory=" + string.Join(",", ColorHistory)).AppendLine("jpegQuality=" + JpegQuality).AppendLine("outputScale=" + OutputScale);
             // Written next to the file first, a crash can't leave half a settings file.
             lock (SaveGate)
             {

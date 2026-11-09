@@ -120,9 +120,12 @@ namespace Glint
             p.AddRow(L.T("Bildschirm einfrieren"), freeze);
             var cross = new Toggle(s.Crosshair); cross.Changed = () => s.Crosshair = cross.On;
             p.AddRow(L.T("Großes Fadenkreuz"), cross);
-            var color = new Segmented(new[] { "hex", "rgb", "oklch" }, new[] { "HEX", "RGB", "OKLCH" }, s.ColorFormat, 230);
+            var color = new Segmented(Colors.Formats, new[] { "HEX", "RGB", "HSL", "HSB", "OKLCH" }, s.ColorFormat, 300);
             color.Changed = () => s.ColorFormat = color.Value;
             p.AddRow(L.T("Farbformat"), color);
+            var colorAfter = new Segmented(new[] { "panel", "copy" }, new[] { "Panel", L.T("Nur kopieren") }, s.ColorAfter, 230);
+            colorAfter.Changed = () => s.ColorAfter = colorAfter.Value;
+            p.AddRow(L.T("Nach Farbaufnahme"), colorAfter);
             string[] heights = { "20000", "50000", "100000", "200000" };
             string nearest = heights.OrderBy(h => Math.Abs(int.Parse(h) - s.MaxScroll)).First();
             var scroll = new Segmented(heights, new[] { "20k", "50k", "100k", "200k" }, nearest, 230);

@@ -678,7 +678,7 @@ namespace Glint
                     return true;
                 case Keys.F:
                     var s = Settings.Current;
-                    s.ColorFormat = s.ColorFormat == "hex" ? "rgb" : s.ColorFormat == "rgb" ? "oklch" : "hex";
+                    s.ColorFormat = Colors.Formats[(Array.IndexOf(Colors.Formats, s.ColorFormat) + 1) % Colors.Formats.Length];
                     s.Save(); Note(L.T("Farbformat: ") + s.ColorFormat.ToUpper(), 1600); return true;
             }
             if (tool == Tool.Crop && crop.HasValue)

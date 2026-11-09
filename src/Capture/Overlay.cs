@@ -13,7 +13,8 @@ namespace Glint
     {
         public Action<Tuple<Rectangle, Bitmap>> Done;
         static readonly Color Accent = Color.FromArgb(255, 94, 91);
-        readonly bool frozen, picker; // picker: only picks a color
+        readonly bool frozen;
+        bool picker; // only picks a color, Tab switches into it while snipping
         bool cursorHidden;
         readonly Bitmap shot, dim; // frozen mode only
         readonly Rectangle virt;
@@ -140,7 +141,7 @@ namespace Glint
                 Tuple.Create("Esc", L.T("Abbrechen"), false),
                 Tuple.Create("W", "Snap", snap),
                 Tuple.Create("C", L.T("Fadenkreuz"), Settings.Current.Crosshair),
-                Tuple.Create("Tab", L.T("Farbe kopieren"), false) };
+                Tuple.Create("Tab", L.T("Farbwähler"), false) };
             if (dragging) items.Insert(1, Tuple.Create(L.T("Leertaste"), L.T("Verschieben"), moving));
             return items;
         }
@@ -236,12 +237,21 @@ namespace Glint
                 return darkest ? Imaging.Darkest(b, new Point(b.Width / 2, b.Height / 2)) : b.GetPixel(b.Width / 2, b.Height / 2);
         }
 
+        // Swaps the square loupe for the round picker without leaving the overlay.
+        void EnterPicker()
+        {
+            picker = true; snap = false;
+            if (!cursorHidden) { Cursor.Hide(); cursorHidden = true; }
+            dirty = new Rectangle(0, 0, Width, Height);
+            Update2();
+        }
+
         void Pick(Color c)
         {
             Clipboard.SetText(Colors.Format(c, Settings.Current.ColorFormat));
             Close();
-            Sounds.Play(Sounds.Kind.Pick);
-            ColorPanel.Open(c);
+            if (Settings.Current.ColorAfter == "copy") Sounds.Play(Sounds.Kind.Pick);
+            else ColorPanel.Open(c); // plays the sound as it appears
         }
 
         // Round magnifier that replaces the cursor while picking.
@@ -456,7 +466,8 @@ namespace Glint
                 Native.SetCursorPos(c.X + (code == Keys.Left ? -step : code == Keys.Right ? step : 0), c.Y + (code == Keys.Up ? -step : code == Keys.Down ? step : 0));
                 return true;
             }
-            if (code == Keys.Tab || (picker && (code == Keys.Return || code == Keys.Space)))
+            if (code == Keys.Tab && !picker && !dragging) { EnterPicker(); return true; }
+            if (picker && (code == Keys.Tab || code == Keys.Return || code == Keys.Space))
             {
                 Pick(Sample((k & Keys.Shift) != 0));
                 return true;

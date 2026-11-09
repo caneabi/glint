@@ -33,8 +33,57 @@ namespace Glint
         {
             if (instance == null || instance.IsDisposed) instance = new ColorPanel();
             instance.Add(c);
-            if (!instance.Visible) { instance.PlaceNearCursor(); instance.Show(); }
+            Sounds.Play(Sounds.Kind.Pick);
+            if (!instance.Visible) instance.Appear();
             instance.Activate();
+        }
+
+        // Fades in and slides up a little, the swatches pop in after it.
+        const int AppearMs = 220, PopMs = 320, Slide = 14;
+        readonly Timer anim = new Timer { Interval = 15 };
+        readonly System.Diagnostics.Stopwatch[] popClock = { new System.Diagnostics.Stopwatch(), new System.Diagnostics.Stopwatch() };
+        readonly System.Diagnostics.Stopwatch appearClock = new System.Diagnostics.Stopwatch();
+        int targetTop;
+
+        static float EaseOut(float t) { return 1 - (1 - t) * (1 - t) * (1 - t); }
+        static float Back(float t) { t -= 1; return 1 + 2.4f * t * t * t + 1.4f * t * t; }
+
+        void Appear()
+        {
+            PlaceNearCursor();
+            targetTop = Top;
+            Opacity = 0;
+            Top = targetTop + Slide;
+            Show();
+            appearClock.Restart();
+            Pop(0); Pop(1);
+        }
+
+        void Pop(int slot) { popClock[slot].Restart(); anim.Start(); }
+
+        void Animate()
+        {
+            bool running = false;
+            if (appearClock.IsRunning)
+            {
+                float t = Math.Min(1, appearClock.ElapsedMilliseconds / (float)AppearMs), e = EaseOut(t);
+                Opacity = e;
+                Top = targetTop + (int)Math.Round(Slide * (1 - e));
+                if (t >= 1) appearClock.Reset(); else running = true;
+            }
+            foreach (var c in popClock)
+                if (c.IsRunning) { if (c.ElapsedMilliseconds > PopMs + 80) c.Reset(); else running = true; }
+            Invalidate();
+            if (!running) anim.Stop();
+        }
+
+        float PopScale(int slot)
+        {
+            var c = popClock[slot];
+            if (!c.IsRunning) return 1;
+            // The second swatch follows a moment later.
+            float t = Math.Max(0, Math.Min(1, (c.ElapsedMilliseconds - (appearClock.IsRunning ? slot * 70 : 0)) / (float)PopMs));
+            return .86f + .14f * Back(t);
         }
 
         ColorPanel()
@@ -49,6 +98,7 @@ namespace Glint
             if (history.Count > 0) { Color c; if (ColorPicker.TryParse(history[0], out c)) slots[1] = c; }
             if (history.Count > 1) { Color c; if (ColorPicker.TryParse(history[1], out c)) slots[0] = c; }
             copiedTimer.Tick += delegate { copiedTimer.Stop(); copiedRow = -1; Invalidate(); };
+            anim.Tick += delegate { Animate(); };
         }
 
         void PlaceNearCursor()
@@ -64,6 +114,7 @@ namespace Glint
         void Add(Color c)
         {
             slots[next] = Color.FromArgb(255, c);
+            if (Visible) Pop(next);
             active = next;
             next = 1 - next;
             var list = Settings.Current.ColorHistory;
@@ -171,7 +222,9 @@ namespace Glint
 
         void DrawSlot(Graphics g, int i)
         {
-            var r = SlotR(i);
+            var full = SlotR(i);
+            float s = PopScale(i);
+            var r = Rectangle.Round(RectangleF.Inflate(full, -(1 - s) * full.Width / 2, -(1 - s) * full.Height / 2));
             var c = slots[i];
             Ui.Pill(g, r, c, 18);
             if (i == active) using (var path = Renderer.Round(RectangleF.Inflate(r, 2.5f, 2.5f), 22)) using (var p = new Pen(Ui.Accent, 2)) g.DrawPath(p, path);
@@ -237,6 +290,6 @@ namespace Glint
             }
         }
 
-        protected override void Dispose(bool d) { if (d) copiedTimer.Dispose(); base.Dispose(d); }
+        protected override void Dispose(bool d) { if (d) { copiedTimer.Dispose(); anim.Dispose(); } base.Dispose(d); }
     }
 }
