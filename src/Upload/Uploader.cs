@@ -42,7 +42,7 @@ namespace Glint
         }
 
         // Uploads a copy and puts the link on the clipboard. False: uploaded, but the clipboard was locked.
-        public static async Task<bool> Upload(Bitmap b, Destination d)
+        public static async Task<bool> Upload(Bitmap b, Destination d, System.Threading.CancellationToken cancel = default(System.Threading.CancellationToken))
         {
             var copy = Imaging.Crop(b, new Rectangle(0, 0, b.Width, b.Height));
             try
@@ -51,7 +51,9 @@ namespace Glint
                 {
                     string ext, mime;
                     var data = Encode(copy, out ext, out mime);
-                    return Send(d, data, ext, mime, copy.Width, copy.Height);
+                    HttpSend.Cancel = cancel;
+                    try { return Send(d, data, ext, mime, copy.Width, copy.Height); }
+                    finally { HttpSend.Cancel = default(System.Threading.CancellationToken); }
                 });
                 Log.Info("Upload nach " + d.Name + ": " + url);
                 Sounds.Play(Sounds.Kind.Upload);
@@ -63,12 +65,14 @@ namespace Glint
 
         public static async void Run(Bitmap b, Destination d)
         {
-            Toast.Show(L.T("Lädt hoch…"), 15000);
+            using (var cancel = new System.Threading.CancellationTokenSource())
             try
             {
-                if (await Upload(b, d)) Toast.Show(L.T("Link kopiert"), 2000);
+                Toast.Action(L.T("Lädt hoch… Klicken zum Abbrechen"), 120000, cancel.Cancel);
+                if (await Upload(b, d, cancel.Token)) Toast.Show(L.T("Link kopiert"), 2000);
                 else Toast.Error(L.T("Hochgeladen, Link steht im Log"), "Zwischenablage", null);
             }
+            catch (OperationCanceledException) { Toast.Show(L.T("Upload abgebrochen"), 2000); }
             catch (Exception ex) { Toast.Error(L.T("Upload fehlgeschlagen"), "Upload nach " + d.Name + " (" + d.TypeName + ")", ex); }
         }
 

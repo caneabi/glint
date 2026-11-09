@@ -9,15 +9,15 @@ using System.Windows.Forms;
 
 namespace Glint
 {
-    public class Editor : Form, IImageSource
+    public partial class Editor : Form, IImageSource
     {
         const int BarH = 52, AttrH = 0, StatusH = 0;
         static readonly Color Bg = Ui.Bg, Bar = Ui.Side, Hover = Ui.Well, Accent = Ui.Accent;
         static readonly Color[] Palette = { Color.FromArgb(255, 94, 91), Color.FromArgb(255, 170, 40), Color.FromArgb(255, 221, 50), Color.FromArgb(70, 200, 110), Color.FromArgb(60, 140, 255), Color.FromArgb(170, 100, 245), Color.White, Color.Black };
 
-        Bitmap baseImg, composed, display;
-        public List<Obj> Objs = new List<Obj>();
-        readonly Stack<Tuple<Bitmap, List<Obj>>> undo = new Stack<Tuple<Bitmap, List<Obj>>>(), redo = new Stack<Tuple<Bitmap, List<Obj>>>();
+        readonly EditorDocument doc;
+        Bitmap composed, display;
+        public List<Obj> Objs { get { return doc.Objs; } }
         Tool tool = Tool.Select;
         Obj sel, draft;
         Color color = Palette[0]; float width = 4; bool fill, hand; int opacity = 100;
@@ -39,12 +39,13 @@ namespace Glint
         string statusNote = "";
         readonly Dictionary<string, ButtonFx> fx = new Dictionary<string, ButtonFx>();
         Timer fxTimer;
+        System.Threading.CancellationTokenSource uploadCancel;
         string note;
         DateTime noteUntil;
 
         public Editor(Bitmap img)
         {
-            baseImg = img;
+            doc = new EditorDocument(img);
             Text = "Glint";
             Icon = Brand.AppIcon;
             BackColor = Bg; DoubleBuffered = true; KeyPreview = true; AllowDrop = true;
@@ -80,8 +81,6 @@ namespace Glint
             if (p.Y < BarH && HitBtn(p) == null && !sizeRect.Contains(p) && !zoomRect.Contains(p) && !minR.Contains(p) && !closeR.Contains(p)) return 2;
             return 1;
         }
-
-        void SetWinHover(int v) { if (winHover != v) { winHover = v; Invalidate(new Rectangle(minR.X, 0, 138, BarH)); } }
 
         protected override void WndProc(ref Message m)
         {
@@ -124,103 +123,6 @@ namespace Glint
             base.WndProc(ref m);
         }
 
-        void PaintWindowButtons(Graphics g)
-        {
-            var old = g.SmoothingMode; g.SmoothingMode = SmoothingMode.None;
-            if (winHover > 0)
-                using (var b = new SolidBrush(winHover == 3 ? Color.FromArgb(232, 17, 35) : Hover))
-                    g.FillRectangle(b, winHover == 1 ? minR : winHover == 2 ? maxR : closeR);
-            using (var p = new Pen(Color.FromArgb(235, 235, 238)))
-            {
-                int cy = BarH / 2;
-                int x = minR.X + 18; g.DrawLine(p, x, cy, x + 10, cy);
-                x = maxR.X + 18;
-                if (Zoomed) { g.DrawRectangle(p, x, cy - 3, 8, 8); g.DrawLines(p, new[] { new Point(x + 2, cy - 3), new Point(x + 2, cy - 5), new Point(x + 10, cy - 5), new Point(x + 10, cy + 3), new Point(x + 8, cy + 3) }); }
-                else g.DrawRectangle(p, x, cy - 5, 10, 10);
-                x = closeR.X + 18;
-                g.SmoothingMode = SmoothingMode.AntiAlias;
-                g.DrawLine(p, x, cy - 5, x + 10, cy + 5); g.DrawLine(p, x + 10, cy - 5, x, cy + 5);
-            }
-            g.SmoothingMode = old;
-        }
-
-        void BuildButtons()
-        {
-            Action<string, string, Tool?> add = (id, tip, t) => buttons.Add(new Btn { Id = id, Tip = tip, Tool = t });
-            add("copy", L.T("Kopieren  Strg+C"), null); add("save", L.T("Speichern  Strg+S"), null); add("pin", L.T("Anpinnen  Strg+P"), null); add("upload", L.T("Hochladen  Strg+U"), null); add("ocr", L.T("Text erkennen  Strg+T"), null);
-            add("drag", L.T("In andere App ziehen"), null);
-            add("select", L.T("Auswählen  V"), Tool.Select); add("arrow", L.T("Pfeil  A"), Tool.Arrow); add("text", "Text  T", Tool.Text); add("ruler", L.T("Lineal  U"), Tool.Ruler);
-            add("rect", L.T("Rechteck  R"), Tool.Rect); add("blur", L.T("Weichzeichnen  B"), Tool.Blur); add("pen", L.T("Freihand  P"), Tool.Pen);
-            add("crop", L.T("Zuschneiden  X"), Tool.Crop); add("oval", "Oval  O", Tool.Oval); add("line", L.T("Linie  L"), Tool.Line); add("step", L.T("Schrittzähler  N"), Tool.Step);
-            add("highlight", L.T("Textmarker  H"), Tool.Highlight); add("spot", "Spotlight  S", Tool.Spotlight); add("mag", L.T("Lupe  M"), Tool.Magnifier);
-            add("pixel", L.T("Verpixeln  K"), Tool.Pixelate); add("erase", L.T("Entfernen  E"), Tool.Erase);
-            add("undo", L.T("Rückgängig  Strg+Z"), null); add("redo", L.T("Wiederholen  Strg+Y"), null); add("backdrop", "Backdrop", null); add("addcap", L.T("Aufnahme hinzufügen"), null);
-            buttons.Add(new Btn { Id = "more", Tip = L.T("Weitere Werkzeuge") });
-        }
-
-        bool AttrVisible { get { return sel != null || (tool != Tool.Select && tool != Tool.Crop && tool != Tool.Ruler); } }
-
-        void Layout2()
-        {
-            int cw = ClientSize.Width;
-            closeR = new Rectangle(cw - 46, 0, 46, BarH); maxR = new Rectangle(cw - 92, 0, 46, BarH); minR = new Rectangle(cw - 138, 0, 46, BarH);
-            zoomRect = new Rectangle(minR.X - 64, 8, 58, 36);
-            sizeRect = new Rectangle(zoomRect.X - 104, 8, 96, 36);
-            colorRect = new Rectangle(sizeRect.X - 118, 8, 110, 36);
-            int rightStart = colorRect.X - 8, x = 42;
-            const int W = 32, H = 30, Y = (BarH - H) / 2;
-            separators.Clear();
-            var more = buttons[buttons.Count - 1];
-            var toolBtns = new List<Btn>();
-            foreach (var b in buttons)
-            {
-                if (b == more) continue;
-                if (b.Id == "copy" || b.Id == "save" || b.Id == "pin" || b.Id == "upload")
-                {
-                    b.R = new Rectangle(x, Y, W, H); x += W + 8;
-                    separators.Add(x - 4);
-                }
-                else if (b.Id == "ocr") { b.R = new Rectangle(x, Y, W, H); x += W + 14; }
-                else if (b.Id == "drag") { b.R = new Rectangle(x, Y, 58, H); x += 58 + 14; }
-                else toolBtns.Add(b);
-            }
-            int fit = toolBtns.Count;
-            if (x + fit * W > rightStart) fit = Math.Max(0, (rightStart - x - W) / W);
-            for (int i = 0; i < fit; i++) { toolBtns[i].R = new Rectangle(x, Y, W, H); x += W; }
-            more.R = fit < toolBtns.Count ? new Rectangle(x, Y, W, H) : Rectangle.Empty;
-            int over = toolBtns.Count - fit;
-            morePanel = Rectangle.Empty;
-            if (over > 0 && moreOpen)
-            {
-                const int Cols = 5, Cell = 36;
-                int rows = (over + Cols - 1) / Cols, pw = Math.Min(over, Cols) * Cell + 12, ph = rows * Cell + 12;
-                morePanel = new Rectangle(Math.Max(8, more.R.Right - pw), BarH + 6, pw, ph);
-                for (int i = 0; i < over; i++)
-                    toolBtns[fit + i].R = new Rectangle(morePanel.X + 6 + (i % Cols) * Cell + 2, morePanel.Y + 6 + (i / Cols) * Cell + 3, W, H);
-            }
-            else for (int i = fit; i < toolBtns.Count; i++) toolBtns[i].R = Rectangle.Empty;
-
-            attrButtons.Clear();
-            attrPanel = Rectangle.Empty;
-            if (AttrVisible)
-            {
-                int pw = Palette.Length * 24 + 24 + 16 + 26 * 2 + 44 + 8 + 66 * 2 + 16 + 26 * 2 + 44 + 26;
-                attrPanel = new Rectangle((cw - pw) / 2, BarH + 8, pw, 40);
-                int ax = attrPanel.X + 13, ay = attrPanel.Y;
-                for (int i = 0; i < Palette.Length; i++) { attrButtons.Add(new Btn { Id = "c" + i, Tip = L.T("Farbe"), R = new Rectangle(ax, ay + 11, 18, 18) }); ax += 24; }
-                attrButtons.Add(new Btn { Id = "cc", Tip = L.T("Eigene Farbe"), R = new Rectangle(ax, ay + 11, 18, 18) }); ax += 24 + 16;
-                foreach (var t in new[] { L.T("w-|Dünner"), L.T("w+|Dicker"), L.T("fill|Füllung"), L.T("hand|Handgezeichnet"), L.T("o-|Weniger Deckkraft"), L.T("o+|Mehr Deckkraft") })
-                {
-                    var p = t.Split('|');
-                    int w = p[0] == "fill" || p[0] == "hand" ? 62 : 24;
-                    attrButtons.Add(new Btn { Id = p[0], Tip = p[1], R = new Rectangle(ax, ay + 8, w, 24) });
-                    ax += w + 4;
-                    if (p[0] == "w+" || p[0] == "o+") ax += 44;
-                    if (p[0] == "hand") ax += 12;
-                }
-            }
-        }
-
         Rectangle CanvasArea { get { return new Rectangle(0, BarH + AttrH, ClientSize.Width, Math.Max(1, ClientSize.Height - BarH - AttrH - StatusH)); } }
         int Offset { get { return backdrop >= 0 ? Pad : 0; } }
 
@@ -235,9 +137,9 @@ namespace Glint
         {
             if (!composeDirty) return;
             composeDirty = false;
-            if (composed != null && composed.Size != baseImg.Size) { if (display != composed && display != null) display.Dispose(); composed.Dispose(); composed = null; display = null; }
-            if (composed == null) composed = new Bitmap(baseImg.Width, baseImg.Height, PixelFormat.Format32bppPArgb);
-            Renderer.Compose(baseImg, Objs, composed);
+            if (composed != null && composed.Size != doc.Base.Size) { if (display != composed && display != null) display.Dispose(); composed.Dispose(); composed = null; display = null; }
+            if (composed == null) composed = new Bitmap(doc.Base.Width, doc.Base.Height, PixelFormat.Format32bppPArgb);
+            Renderer.Compose(doc.Base, Objs, composed);
             if (display != null && display != composed) display.Dispose();
             display = backdrop >= 0 ? Renderer.Backdrop(composed, backdrop, Pad) : composed;
             cacheStale = true;
@@ -283,11 +185,7 @@ namespace Glint
 
         Bitmap IImageSource.CurrentImage() { return Export(); }
 
-        public Bitmap Export()
-        {
-            using (var c = Renderer.Compose(baseImg, Objs))
-                return backdrop >= 0 ? Renderer.Backdrop(c, backdrop, Pad) : Imaging.Crop(c, new Rectangle(0, 0, c.Width, c.Height));
-        }
+        public Bitmap Export() { return doc.Export(backdrop, Pad); }
 
         void UpdateFit()
         {
@@ -356,7 +254,7 @@ namespace Glint
             g.ScaleTransform(zoom, zoom);
             if (draft.Kind == Kind.Pixelate || draft.Kind == Kind.Blur || draft.Kind == Kind.Erase || draft.Kind == Kind.Spotlight || draft.Kind == Kind.Magnifier)
                 using (var p = new Pen(Color.White, 1.5f / zoom) { DashStyle = DashStyle.Dash }) { var r = draft.Box; g.DrawRectangle(p, r.X, r.Y, r.Width, r.Height); }
-            else Renderer.Draw(g, baseImg, baseImg, draft);
+            else Renderer.Draw(g, doc.Base, doc.Base, draft);
             g.Restore(st);
         }
 
@@ -447,225 +345,9 @@ namespace Glint
             if (rulerAxis != 1) one(false);
         }
 
-        // Results show up on the button and in a chip, not in a toast at the bottom.
-        void Effect(string id, ButtonFx.State state, string message = null)
-        {
-            fx[id] = new ButtonFx(state);
-            if (message != null) Note(message, state == ButtonFx.State.Fail ? 4000 : 2500);
-            StartFxTimer();
-        }
-
-        void Note(string text, int ms)
-        {
-            note = text; noteUntil = DateTime.Now.AddMilliseconds(ms);
-            StartFxTimer();
-        }
-
-        void StartFxTimer()
-        {
-            if (fxTimer == null)
-            {
-                fxTimer = new Timer { Interval = 16 };
-                fxTimer.Tick += delegate
-                {
-                    foreach (var id in fx.Where(p => p.Value.Finished).Select(p => p.Key).ToList()) fx.Remove(id);
-                    if (note != null && DateTime.Now > noteUntil) note = null;
-                    if (fx.Count == 0 && note == null) fxTimer.Stop();
-                    Invalidate(new Rectangle(0, 0, ClientSize.Width, BarH + 120));
-                };
-            }
-            fxTimer.Start();
-        }
-
-        void DrawEffects(Graphics g)
-        {
-            foreach (var p in fx)
-            {
-                var b = buttons.FirstOrDefault(x => x.Id == p.Key);
-                if (b == null || b.R.IsEmpty || (b.R.Y >= BarH && !moreOpen)) continue;
-                p.Value.Draw(g, b.R.X + b.R.Width / 2f, b.R.Y + b.R.Height / 2f);
-            }
-            if (note != null) Glint.Chip.Draw(g, note, new Rectangle(ClientSize.Width / 2 - 320, BarH + 10, 640, 28));
-        }
-
-        bool Busy(string id) { ButtonFx f; return fx.TryGetValue(id, out f) && f.Kind == ButtonFx.State.Busy; }
-
-        async void RunOcr()
-        {
-            if (Busy("ocr")) return;
-            Effect("ocr", ButtonFx.State.Busy);
-            try
-            {
-                string text;
-                using (var x = Export()) text = await Tray.OcrCopy(x);
-                if (IsDisposed) return;
-                if (text == "") Effect("ocr", ButtonFx.State.Fail, L.T("Kein Text gefunden"));
-                else Effect("ocr", ButtonFx.State.Done);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("OCR", ex);
-                if (!IsDisposed) Effect("ocr", ButtonFx.State.Fail, L.T("Texterkennung fehlgeschlagen"));
-            }
-        }
-
-        async void RunUpload(Destination d)
-        {
-            if (Busy("upload")) return;
-            if (d == null) { Effect("upload", ButtonFx.State.Fail, L.T("Kein Upload-Ziel eingerichtet")); return; }
-            Effect("upload", ButtonFx.State.Busy);
-            try
-            {
-                bool copied;
-                using (var x = Export()) copied = await Uploader.Upload(x, d);
-                if (!IsDisposed) Effect("upload", ButtonFx.State.Done, copied ? null : L.T("Hochgeladen, Link steht im Log"));
-            }
-            catch (Exception ex)
-            {
-                Log.Error("Upload nach " + d.Name + " (" + d.TypeName + ")", ex);
-                if (!IsDisposed) Effect("upload", ButtonFx.State.Fail, L.T("Upload fehlgeschlagen"));
-            }
-        }
-
-        void DrawButton(Graphics g, Btn b)
-        {
-            ButtonFx running;
-            if (fx.TryGetValue(b.Id, out running) && running.HidesIcon) return;
-            float cx = b.R.X + b.R.Width / 2f, cy = b.R.Y + b.R.Height / 2f;
-            var c = Color.FromArgb(232, 232, 235);
-            switch (b.Id)
-            {
-                case "drag":
-                    var grip = Color.FromArgb(125, 128, 134);
-                    Icons.DrawLucide(g, "grip-vertical", cx - 17, cy, 18, 1.6f, grip);
-                    Icons.DrawLucide(g, "file", cx, cy, 20, 1.5f, c);
-                    Icons.DrawLucide(g, "grip-vertical", cx + 17, cy, 18, 1.6f, grip);
-                    break;
-                case "select": Icons.FillLucide(g, "mouse-pointer-2", cx, cy, 19, 1.4f, c); break;
-                case "text":
-                    using (var f = new Font("Georgia", 18f, FontStyle.Bold, GraphicsUnit.Pixel))
-                    using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                    using (var br = new SolidBrush(c)) g.DrawString("T", f, br, cx, cy, sf);
-                    break;
-                case "ruler":
-                    using (var f = new Font("Segoe UI", 9f, FontStyle.Bold, GraphicsUnit.Pixel))
-                    using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                    using (var br = new SolidBrush(c)) g.DrawString("12", f, br, cx, cy - 6, sf);
-                    using (var p = new Pen(c, 1.4f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-                    {
-                        g.DrawLine(p, cx - 9, cy + 6, cx + 9, cy + 6);
-                        g.DrawLine(p, cx - 9, cy + 3, cx - 9, cy + 9);
-                        g.DrawLine(p, cx + 9, cy + 3, cx + 9, cy + 9);
-                    }
-                    break;
-                default: Icons.DrawLucide(g, Icons.Name(b.Id), cx, cy, 20, 1.5f, c); break;
-            }
-        }
-
-        static void InfoBlock(Graphics g, Rectangle r, string top, string bottom)
-        {
-            using (var f = new Font("Segoe UI", 12f, GraphicsUnit.Pixel))
-            using (var d = new SolidBrush(Color.FromArgb(150, 150, 156)))
-            using (var t = new SolidBrush(Color.FromArgb(235, 235, 238)))
-            {
-                g.DrawString(top, f, t, r.X, r.Y + 2);
-                g.DrawString(bottom, f, d, r.X, r.Y + 18);
-            }
-        }
-
-        void PaintBars(Graphics g)
-        {
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
-            using (var b = new SolidBrush(Bar)) g.FillRectangle(b, 0, 0, ClientSize.Width, BarH);
-            using (var p = new Pen(Color.FromArgb(16, 16, 18))) g.DrawLine(p, 0, BarH - 1, ClientSize.Width, BarH - 1);
-            using (var p = new Pen(Color.FromArgb(70, 70, 75)))
-            {
-                foreach (int x in separators) g.DrawLine(p, x, 17, x, 35);
-                g.DrawLine(p, sizeRect.X - 8, 13, sizeRect.X - 8, 39);
-                g.DrawLine(p, zoomRect.X - 8, 13, zoomRect.X - 8, 39);
-            }
-            Brand.DrawMark(g, new Rectangle(15, 18, 16, 16), Color.FromArgb(232, 232, 235), Brand.Pixel);
-            foreach (var btn in buttons)
-            {
-                if (btn.R.IsEmpty || btn.R.Y >= BarH) continue;
-                bool on = btn.Tool == tool || (btn.Id == "backdrop" && backdrop >= 0) || (btn.Id == "more" && moreOpen);
-                if (on || btn == hover)
-                    using (var path = Renderer.Round(btn.R, 12)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(52, 52, 56))) g.FillPath(br, path);
-                DrawButton(g, btn);
-            }
-
-            bool inside = hoverValid && new Rectangle(0, 0, composed.Width, composed.Height).Contains(hoverPx);
-            Color shown = inside ? composed.GetPixel(hoverPx.X, hoverPx.Y) : picked ?? Color.FromArgb(70, 70, 75);
-            using (var br = new SolidBrush(shown)) g.FillEllipse(br, colorRect.X, colorRect.Y + 8, 20, 20);
-            using (var p = new Pen(Color.FromArgb(50, 255, 255, 255))) g.DrawEllipse(p, colorRect.X, colorRect.Y + 8, 20, 20);
-            InfoBlock(g, new Rectangle(colorRect.X + 28, colorRect.Y, 80, 36), Colors.Hex(shown), L.T("Tab: kopieren"));
-            InfoBlock(g, sizeRect, display.Width + "×" + display.Height + " px", L.T("Bildgröße"));
-            InfoBlock(g, zoomRect, (int)Math.Round(zoom * 100) + " %", "Zoom");
-            PaintWindowButtons(g);
-
-            if (!morePanel.IsEmpty)
-            {
-                using (var path = Renderer.Round(morePanel, 20)) using (var br = new SolidBrush(Color.FromArgb(40, 40, 43))) g.FillPath(br, path);
-                using (var path = Renderer.Round(morePanel, 20)) using (var p = new Pen(Color.FromArgb(70, 70, 75))) g.DrawPath(p, path);
-                foreach (var btn in buttons)
-                {
-                    if (btn.R.IsEmpty || btn.R.Y < BarH) continue;
-                    bool on = btn.Tool == tool || (btn.Id == "backdrop" && backdrop >= 0);
-                    if (on || btn == hover)
-                        using (var path = Renderer.Round(btn.R, 12)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(58, 58, 62))) g.FillPath(br, path);
-                    DrawButton(g, btn);
-                }
-            }
-
-            if (!attrPanel.IsEmpty)
-            {
-                using (var path = Renderer.Round(attrPanel, 20)) using (var br = new SolidBrush(Color.FromArgb(240, 36, 36, 38))) g.FillPath(br, path);
-                using (var path = Renderer.Round(attrPanel, 20)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
-                using (var f = new Font("Segoe UI", 9f))
-                using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                    foreach (var btn in attrButtons)
-                    {
-                        if (btn.Id[0] == 'c')
-                        {
-                            Color c = btn.Id == "cc" ? color : Palette[int.Parse(btn.Id.Substring(1))];
-                            using (var br = new SolidBrush(c)) g.FillEllipse(br, btn.R);
-                            bool cur = btn.Id != "cc" && c.ToArgb() == color.ToArgb();
-                            using (var p = new Pen(cur ? Color.White : Color.FromArgb(60, 255, 255, 255), cur ? 2 : 1)) g.DrawEllipse(p, btn.R);
-                            if (btn.Id == "cc") g.DrawString("+", f, Renderer.Contrast(c) == Color.White ? Brushes.White : Brushes.Black, btn.R, sf);
-                            continue;
-                        }
-                        bool active = (btn.Id == "fill" && fill) || (btn.Id == "hand" && hand);
-                        using (var path = Renderer.Round(btn.R, 10)) using (var br = new SolidBrush(active ? Hover : btn == hover ? Color.FromArgb(58, 58, 62) : Color.FromArgb(46, 46, 49))) g.FillPath(br, path);
-                        string t = btn.Id == "w-" || btn.Id == "o-" ? "−" : btn.Id == "w+" || btn.Id == "o+" ? "+" : btn.Id == "fill" ? L.T("Füllung") : L.T("Skizze");
-                        g.DrawString(t, f, Brushes.White, btn.R, sf);
-                        if (btn.Id == "w+") g.DrawString(width.ToString("0") + " px", f, Brushes.Silver, btn.R.Right + 4, btn.R.Y + 4);
-                        if (btn.Id == "o+") g.DrawString(opacity + " %", f, Brushes.Silver, btn.R.Right + 4, btn.R.Y + 4);
-                    }
-            }
-
-            if (hover != null && hover.Tip != null && hover.Id[0] != 'c')
-            {
-                float top = hover.R.Bottom + 8;
-                var area = new Rectangle(hover.R.X + hover.R.Width / 2 - 100, (int)top, 200, 28);
-                if (area.X < 4) area.X = 4;
-                var parts = hover.Tip.Split(new[] { "  " }, StringSplitOptions.None);
-                Glint.Chip.Draw(g, parts[0], area, parts.Length > 1 ? parts[1] : null);
-            }
-            DrawEffects(g);
-        }
-
-        void PushUndo()
-        {
-            undo.Push(Tuple.Create(baseImg, Objs.Select(o => o.Clone()).ToList()));
-            redo.Clear();
-        }
-        void Restore(Stack<Tuple<Bitmap, List<Obj>>> from, Stack<Tuple<Bitmap, List<Obj>>> to)
-        {
-            if (from.Count == 0) return;
-            to.Push(Tuple.Create(baseImg, Objs));
-            var s = from.Pop(); baseImg = s.Item1; Objs = s.Item2; sel = null; crop = null;
-            Recompose();
-        }
+        void Undo() { if (doc.Undo()) AfterHistory(); }
+        void Redo() { if (doc.Redo()) AfterHistory(); }
+        void AfterHistory() { sel = null; crop = null; Recompose(); }
 
         static float Dist(PointF a, PointF b) { return (float)Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y)); }
         static float SegDist(PointF p, PointF a, PointF b)
@@ -692,13 +374,6 @@ namespace Glint
                     if (b.Contains(p)) return o;
                 }
             }
-            return null;
-        }
-
-        Btn HitBtn(Point p)
-        {
-            foreach (var b in buttons) if (b.R.Contains(p)) return b;
-            foreach (var b in attrButtons) if (b.R.Contains(p)) return b;
             return null;
         }
 
@@ -737,7 +412,7 @@ namespace Glint
                 case Tool.Text: dragging = false; StartText(p, null); break;
                 case Tool.Ruler: dragging = false; ImprintRuler(); break;
                 case Tool.Step:
-                    PushUndo(); dragging = false;
+                    doc.Push(); dragging = false;
                     Objs.Add(sel = NewObj(Kind.Step, p));
                     sel.Num = Objs.Where(o => o.Kind == Kind.Step).Select(o => o.Num).DefaultIfEmpty(0).Max() + 1;
                     Recompose(); break;
@@ -761,12 +436,12 @@ namespace Glint
             if (sel != null)
             {
                 var hs = Handles(sel);
-                for (int i = 0; i < hs.Count; i++) if (Dist(hs[i], p) < 9 / zoom) { handle = i; PushUndo(); return; }
+                for (int i = 0; i < hs.Count; i++) if (Dist(hs[i], p) < 9 / zoom) { handle = i; doc.Push(); return; }
             }
             var o = HitObject(p);
             sel = o;
             if (o == null) { dragging = false; return; }
-            PushUndo();
+            doc.Push();
             if ((ModifierKeys & Keys.Alt) != 0) { var c = o.Clone(); Objs.Add(c); sel = c; Recompose(); }
         }
 
@@ -790,7 +465,7 @@ namespace Glint
                 if (tool == Tool.Select && sel != null) DragSelected(p);
                 else if (tool == Tool.Crop)
                 {
-                    var d = new Rectangle(0, 0, baseImg.Width, baseImg.Height);
+                    var d = new Rectangle(0, 0, doc.Base.Width, doc.Base.Height);
                     var r = Rectangle.FromLTRB((int)Math.Min(downAt.X, p.X), (int)Math.Min(downAt.Y, p.Y), (int)Math.Max(downAt.X, p.X), (int)Math.Max(downAt.Y, p.Y));
                     r.Intersect(d); crop = r;
                 }
@@ -846,7 +521,7 @@ namespace Glint
                 bool ok = d.Pts != null ? d.Pts.Count > 1 : Dist(d.A, d.B) > 3;
                 if (ok)
                 {
-                    PushUndo(); Objs.Add(d);
+                    doc.Push(); Objs.Add(d);
                     sel = d.Pts != null ? null : d;
                     if (d.Pts == null) tool = Tool.Select; // pen and highlighter stay active
                     Recompose();
@@ -875,7 +550,7 @@ namespace Glint
 
         void StartText(PointF p, Obj existing)
         {
-            if (existing != null) { PushUndo(); }
+            if (existing != null) { doc.Push(); }
             editingNew = existing == null;
             editing = existing;
             var a = ToScreen(p);
@@ -899,7 +574,7 @@ namespace Glint
             var ed = editor; var o = editing; editor = null; editing = null;
             o.Text = ed.Text.TrimEnd();
             Controls.Remove(ed); ed.Dispose();
-            if (editingNew && o.Text.Length > 0) PushUndo(); // existing text was pushed in StartText
+            if (editingNew && o.Text.Length > 0) doc.Push(); // existing text was pushed in StartText
             if (o.Text.Length > 0) { Objs.Add(o); sel = o; tool = Tool.Select; }
             Recompose(); Focus();
         }
@@ -907,7 +582,7 @@ namespace Glint
         void ImprintRuler()
         {
             if (!new Rectangle(0, 0, composed.Width, composed.Height).Contains(hoverPx)) return;
-            PushUndo();
+            doc.Push();
             Action<bool> add = h =>
             {
                 var s = Span(hoverPx, h);
@@ -918,47 +593,6 @@ namespace Glint
             Recompose();
         }
 
-        void ClickBtn(Btn b)
-        {
-            if (b.Id == "more") { moreOpen = !moreOpen; Invalidate(); return; }
-            moreOpen = false;
-            if (b.Tool.HasValue) { SetTool(b.Tool.Value); return; }
-            switch (b.Id)
-            {
-                case "undo": Restore(undo, redo); break;
-                case "redo": Restore(redo, undo); break;
-                case "backdrop": backdrop = backdrop + 1 >= Renderer.Gradients.Length ? -1 : backdrop + 1; Recompose(); break;
-                case "ocr": RunOcr(); break;
-                case "addcap": AddCapture(); break;
-                case "pin": new PinWindow(Export()).Show(); Close(); break;
-                case "upload": RunUpload(Uploader.Active); break;
-                case "save": Save(); break;
-                case "copy": CopyImage(); break;
-                case "cc":
-                    using (var d = new ColorPicker(color)) if (d.ShowDialog(this) == DialogResult.OK) SetColor(d.Value);
-                    break;
-                case "w-": SetWidth(Math.Max(1, width - 1)); break;
-                case "w+": SetWidth(Math.Min(40, width + 1)); break;
-                case "o-": SetOpacity(Math.Max(10, opacity - 10)); break;
-                case "o+": SetOpacity(Math.Min(100, opacity + 10)); break;
-                case "fill": fill = !fill; Apply(o => o.Fill = fill); break;
-                case "hand": hand = !hand; Apply(o => o.Hand = hand); break;
-                default:
-                    if (b.Id[0] == 'c') SetColor(Palette[int.Parse(b.Id.Substring(1))]);
-                    break;
-            }
-            Invalidate();
-        }
-
-        void SetColor(Color c) { color = c; Apply(o => o.Color = c); }
-        void SetWidth(float w) { width = w; Apply(o => o.Width = w); }
-        void SetOpacity(int v) { opacity = v; Apply(o => o.Opacity = v); }
-        void Apply(Action<Obj> a)
-        {
-            if (sel == null) { Invalidate(); return; }
-            PushUndo(); a(sel); Recompose();
-        }
-
         void SetTool(Tool t)
         {
             CommitText();
@@ -967,110 +601,13 @@ namespace Glint
             Invalidate();
         }
 
-        void CopyImage()
-        {
-            try
-            {
-                using (var b = Export()) Imaging.Copy(b);
-                Effect("copy", ButtonFx.State.Done);
-            }
-            catch (Exception ex)
-            {
-                Log.Error("Kopieren", ex);
-                Effect("copy", ButtonFx.State.Fail, L.T("Kopieren fehlgeschlagen"));
-            }
-        }
-
-        void Save()
-        {
-            try
-            {
-                using (var b = Export())
-                {
-                    var f = Imaging.QuickSave(b);
-                    Effect("save", ButtonFx.State.Done, L.T("Gespeichert: ") + Path.GetFileName(f));
-                }
-            }
-            catch (Exception ex)
-            {
-                Log.Error("Speichern", ex);
-                Effect("save", ButtonFx.State.Fail, L.T("Speichern fehlgeschlagen"));
-            }
-        }
-
-        void SaveAs()
-        {
-            using (var d = new SaveFileDialog { Filter = "PNG|*.png|JPEG|*.jpg|WebP|*.webp", FileName = FileNames.ForSave(baseImg.Width, baseImg.Height), InitialDirectory = Settings.Current.SaveDir })
-                if (d.ShowDialog() == DialogResult.OK)
-                    using (var b = Export()) Imaging.SaveFile(b, d.FileName);
-        }
-
-        void DragOut()
-        {
-            var path = Imaging.TempFile(".png");
-            using (var b = Export()) Imaging.SaveFile(b, path);
-            DoDragDrop(new DataObject(DataFormats.FileDrop, new[] { path }), DragDropEffects.Copy);
-        }
-
-        void AddCapture()
-        {
-            Hide();
-            var t = new Timer { Interval = 180 };
-            t.Tick += delegate
-            {
-                t.Dispose();
-                var o = new Overlay(false);
-                Overlay.Active = true;
-                o.Done = r => AddImage(r.Item2);
-                o.FormClosed += delegate { Show(); Activate(); };
-                o.Show();
-            };
-            t.Start();
-        }
-
-        public void AddImage(Bitmap img)
-        {
-            PushUndo();
-            float x = Math.Max(0, (baseImg.Width - img.Width) / 2f), y = Math.Max(0, (baseImg.Height - img.Height) / 2f);
-            sel = new Obj { Kind = Kind.Image, Img = img, A = new PointF(x, y), B = new PointF(x + img.Width, y + img.Height) };
-            Objs.Add(sel);
-            tool = Tool.Select; Recompose();
-        }
-
-        void ResizeDialog()
-        {
-            using (var f = new Form { Text = L.T("Bildgröße"), FormBorderStyle = FormBorderStyle.FixedDialog, MinimizeBox = false, MaximizeBox = false, StartPosition = FormStartPosition.CenterParent, ClientSize = new Size(260, 90), BackColor = Bar, ForeColor = Color.White })
-            {
-                f.Controls.Add(new Label { Text = L.T("Breite in Pixeln"), Left = 12, Top = 15, Width = 110 });
-                var n = new NumericUpDown { Left = 130, Top = 12, Width = 110, Minimum = 16, Maximum = 20000, Value = Math.Min(20000, Math.Max(16, baseImg.Width)) };
-                var ok = new Button { Text = "OK", Left = 165, Top = 50, Width = 75, DialogResult = DialogResult.OK, FlatStyle = FlatStyle.Flat };
-                f.Controls.Add(n); f.Controls.Add(ok); f.AcceptButton = ok;
-                if (f.ShowDialog(this) != DialogResult.OK) return;
-                float s = (float)n.Value / baseImg.Width;
-                int h = Math.Max(1, (int)(baseImg.Height * s));
-                PushUndo();
-                using (var flat = Renderer.Compose(baseImg, Objs))
-                {
-                    var res = new Bitmap((int)n.Value, h, PixelFormat.Format32bppArgb);
-                    using (var g = Graphics.FromImage(res)) { g.InterpolationMode = InterpolationMode.HighQualityBicubic; g.PixelOffsetMode = PixelOffsetMode.Half; g.DrawImage(flat, 0, 0, res.Width, res.Height); }
-                    baseImg = res; Objs = new List<Obj>(); sel = null; fit = true; Recompose();
-                }
-            }
-        }
-
         protected override void Dispose(bool d)
         {
             if (d)
             {
-                var owned = new HashSet<Bitmap> { baseImg, composed, display, viewCache };
-                foreach (var state in undo.Concat(redo))
-                {
-                    owned.Add(state.Item1);
-                    foreach (var o in state.Item2) owned.Add(o.Img);
-                }
-                foreach (var o in Objs) owned.Add(o.Img);
-                foreach (var b in owned) if (b != null) b.Dispose();
-                undo.Clear(); redo.Clear();
+                foreach (var b in new HashSet<Bitmap> { composed, display, viewCache }) if (b != null) b.Dispose();
+                doc.Dispose();
+                if (uploadCancel != null) uploadCancel.Cancel();
                 if (fxTimer != null) fxTimer.Dispose();
             }
             base.Dispose(d);
@@ -1079,23 +616,8 @@ namespace Glint
         void ApplyCrop()
         {
             if (!crop.HasValue || crop.Value.Width < 2 || crop.Value.Height < 2) { crop = null; return; }
-            PushUndo();
-            var c = crop.Value;
-            baseImg = Imaging.Crop(baseImg, c);
-            foreach (var o in Objs) o.Move(-c.X, -c.Y);
+            doc.Crop(crop.Value);
             crop = null; tool = Tool.Select; fit = true; Recompose();
-        }
-
-        void CopyColor(Color c)
-        {
-            prevPicked = picked; picked = c;
-            string t = Colors.Format(c, Settings.Current.ColorFormat);
-            Clipboard.SetText(t);
-            statusNote = L.T("Kopiert: ") + t;
-            if (prevPicked.HasValue)
-                statusNote += string.Format(L.T("   ·   Kontrast zu {0}: {1:0.00}:1 (WCAG)   Lc {2:0} (APCA)"), Colors.Hex(prevPicked.Value), Colors.Wcag(c, prevPicked.Value), Colors.Apca(c, prevPicked.Value));
-            Note(statusNote, prevPicked.HasValue ? 3500 : 1600);
-            Invalidate();
         }
 
         protected override bool ProcessCmdKey(ref Message m, Keys k)
@@ -1114,7 +636,7 @@ namespace Glint
                 if (sel != null)
                 {
                     float s = shift ? 10 : 1;
-                    PushUndo();
+                    doc.Push();
                     sel.Move(code == Keys.Left ? -s : code == Keys.Right ? s : 0, code == Keys.Up ? -s : code == Keys.Down ? s : 0);
                     Recompose(); return true;
                 }
@@ -1125,8 +647,8 @@ namespace Glint
                 {
                     case Keys.C: CopyImage(); return true;
                     case Keys.S: if (shift) SaveAs(); else Save(); return true;
-                    case Keys.Z: if (shift) Restore(redo, undo); else Restore(undo, redo); return true;
-                    case Keys.Y: Restore(redo, undo); return true;
+                    case Keys.Z: if (shift) Redo(); else Undo(); return true;
+                    case Keys.Y: Redo(); return true;
                     case Keys.P: new PinWindow(Export()).Show(); Close(); return true;
                     case Keys.U: RunUpload(Uploader.Active); return true;
                     case Keys.T: RunOcr(); return true;
@@ -1152,7 +674,7 @@ namespace Glint
                 case Keys.Enter: if (crop.HasValue) { ApplyCrop(); return true; } break;
                 case Keys.Delete:
                 case Keys.Back:
-                    if (sel != null) { PushUndo(); Objs.Remove(sel); sel = null; Recompose(); }
+                    if (sel != null) { doc.Push(); Objs.Remove(sel); sel = null; Recompose(); }
                     return true;
                 case Keys.F:
                     var s = Settings.Current;

@@ -26,6 +26,9 @@ namespace Glint
 
         const int MaxResponse = 1024 * 1024;
 
+        // Set by the uploader on its worker thread, aborting the request cancels the upload.
+        [ThreadStatic] public static System.Threading.CancellationToken Cancel;
+
         static void CheckTransport(Destination d, Uri uri)
         {
             if (uri.Scheme == Uri.UriSchemeHttps) return;
@@ -107,6 +110,9 @@ namespace Glint
             req.AllowAutoRedirect = false; // don't send credentials to another host
             foreach (var h in headers)
                 if (!string.IsNullOrEmpty(h.Value)) SetHeader(req, h.Key, h.Value);
+            var cancel = Cancel;
+            cancel.ThrowIfCancellationRequested();
+            using (cancel.Register(req.Abort))
             try
             {
                 if (body.Length > 0)
@@ -124,6 +130,7 @@ namespace Glint
             }
             catch (WebException ex)
             {
+                if (cancel.IsCancellationRequested) throw new OperationCanceledException(cancel);
                 var res = ex.Response as HttpWebResponse;
                 if (res == null) throw new InvalidOperationException(ex.Status + ": " + ex.Message, ex);
                 string text = ReadLimited(res);
