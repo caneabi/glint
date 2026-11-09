@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -22,7 +23,10 @@ namespace Glint
         readonly List<Native.WinInfo> windows;
         bool snap, dragging, moving;
         Point start, cur, moveFrom;
-        Rectangle dirty = Rectangle.Empty;
+        // What the last frame drew, so the next one only repaints what moved.
+        bool redrawAll = true;
+        Rectangle lastLoupe, lastHint, lastHighlight;
+        Point lastCur;
         const int Cells = 15, Cell = 8, Loupe = Cells * Cell, InfoH = 30;
         // live mode
         IntPtr dib, memDc, oldBmp, bits;
@@ -158,13 +162,19 @@ namespace Glint
             return items;
         }
 
+        string hintKey;
+        int hintWidth;
+
         int HintWidth(List<Tuple<string, string, bool>> items)
         {
+            string key = string.Join("|", items.Select(i => i.Item1 + i.Item2));
+            if (key == hintKey) return hintWidth; // measuring text every frame adds up
+            hintKey = key;
             using (var g = Graphics.FromImage(Measure))
             {
                 float w = HintPad * 2 - ItemGap;
                 foreach (var i in items) w += g.MeasureString(i.Item1, KeyFont).Width + 10 + CapGap + g.MeasureString(i.Item2, HintFont).Width + ItemGap;
-                return (int)Math.Ceiling(w);
+                return hintWidth = (int)Math.Ceiling(w);
             }
         }
 
@@ -175,21 +185,82 @@ namespace Glint
             return new Rectangle(b.X - virt.X + (b.Width - w) / 2, b.Y - virt.Y + 18, w, HintH);
         }
 
+        // Label above or inside the selection, see DrawSelection.
+        static Rectangle LabelArea(Rectangle r) { return new Rectangle(r.X - 2, r.Y - 34, 200, 68); }
+
+        // A growing selection only changes along its edges, the inside is the same picture.
+        static void EdgeStrips(List<Rectangle> parts, Rectangle a, Rectangle b)
+        {
+            const int m = 6;
+            var u = Rectangle.Union(a, b);
+            parts.Add(Rectangle.FromLTRB(Math.Min(a.Left, b.Left) - m, u.Top - m, Math.Max(a.Left, b.Left) + m, u.Bottom + m));
+            parts.Add(Rectangle.FromLTRB(Math.Min(a.Right, b.Right) - m, u.Top - m, Math.Max(a.Right, b.Right) + m, u.Bottom + m));
+            parts.Add(Rectangle.FromLTRB(u.Left - m, Math.Min(a.Top, b.Top) - m, u.Right + m, Math.Max(a.Top, b.Top) + m));
+            parts.Add(Rectangle.FromLTRB(u.Left - m, Math.Min(a.Bottom, b.Bottom) - m, u.Right + m, Math.Max(a.Bottom, b.Bottom) + m));
+        }
+
         void Update2()
         {
+            var parts = new List<Rectangle>();
+            var loupe = Rectangle.Inflate(LoupeRect(), 2, 2);
+            var hint = Rectangle.Inflate(HintRect(), 40, 0); // width changes with the items
             var r = Highlight();
-            var next = Rectangle.Union(Rectangle.Inflate(LoupeRect(), 2, 2), Rectangle.Inflate(HintRect(), 40, 0)); // width changes with the items
-            if (!r.IsEmpty) next = Rectangle.Union(next, Rectangle.Inflate(r, 6, 6));
-            if (!r.IsEmpty) next = Rectangle.Union(next, new Rectangle(r.X - 2, r.Y - 34, 190, 34));
-            if (Settings.Current.Crosshair)
+            if (redrawAll) { parts.Add(new Rectangle(0, 0, Width, Height)); redrawAll = false; }
+            else
             {
-                next = Rectangle.Union(next, new Rectangle(0, cur.Y - 1, Width, 3));
-                next = Rectangle.Union(next, new Rectangle(cur.X - 1, 0, 3, Height));
+                parts.Add(lastLoupe); parts.Add(loupe);
+                if (hint != lastHint) { parts.Add(lastHint); parts.Add(hint); }
+                if (r != lastHighlight)
+                {
+                    if (dragging && !r.IsEmpty && !lastHighlight.IsEmpty) EdgeStrips(parts, lastHighlight, r);
+                    else
+                    {
+                        // a different snapped window: its whole area turns from dim to clear
+                        if (!lastHighlight.IsEmpty) parts.Add(Rectangle.Inflate(lastHighlight, 6, 6));
+                        if (!r.IsEmpty) parts.Add(Rectangle.Inflate(r, 6, 6));
+                    }
+                    if (!lastHighlight.IsEmpty) parts.Add(LabelArea(lastHighlight));
+                    if (!r.IsEmpty) parts.Add(LabelArea(r));
+                }
+                if (Settings.Current.Crosshair && cur != lastCur)
+                {
+                    parts.Add(new Rectangle(0, lastCur.Y - 1, Width, 3)); parts.Add(new Rectangle(lastCur.X - 1, 0, 3, Height));
+                    parts.Add(new Rectangle(0, cur.Y - 1, Width, 3)); parts.Add(new Rectangle(cur.X - 1, 0, 3, Height));
+                }
             }
-            var all = dirty.IsEmpty ? next : Rectangle.Union(dirty, next);
-            dirty = next;
-            if (frozen) Invalidate(all);
-            else if (buffer != null) Present(all);
+            lastLoupe = loupe; lastHint = hint; lastHighlight = r; lastCur = cur;
+            foreach (var part in Merge(parts)) Render(part);
+        }
+
+        // Overlapping parts become one, far apart parts stay separate.
+        static List<Rectangle> Merge(List<Rectangle> parts)
+        {
+            var list = parts.Where(p => p.Width > 0 && p.Height > 0).ToList();
+            for (bool merged = true; merged;)
+            {
+                merged = false;
+                for (int i = 0; i < list.Count && !merged; i++)
+                    for (int j = i + 1; j < list.Count; j++)
+                        if (list[i].IntersectsWith(list[j])) { list[i] = Rectangle.Union(list[i], list[j]); list.RemoveAt(j); merged = true; break; }
+            }
+            return list;
+        }
+
+        // Draws straight away instead of waiting for WM_PAINT, so frames don't pile up.
+        void Render(Rectangle clip)
+        {
+            clip.Intersect(new Rectangle(0, 0, virt.Width, virt.Height));
+            if (clip.Width <= 0 || clip.Height <= 0) return;
+            if (buffer == null || !IsHandleCreated) { Invalidate(clip); return; }
+            if (!frozen) { Present(clip); return; }
+            using (var g = Graphics.FromImage(buffer))
+            {
+                g.SetClip(clip);
+                DrawScene(g, clip);
+            }
+            IntPtr hdc = Native.GetDC(Handle);
+            Native.BitBlt(hdc, clip.X, clip.Y, clip.Width, clip.Height, memDc, clip.X, clip.Y, 0x00CC0020);
+            Native.ReleaseDC(Handle, hdc);
         }
 
         protected override void OnPaint(PaintEventArgs e)
@@ -230,8 +301,8 @@ namespace Glint
                     g.DrawLine(p, cur.X, 0, cur.X, Height);
                 }
             if (any) DrawSelection(g, r);
-            DrawLoupe(g);
-            DrawHint(g);
+            if (clip.IntersectsWith(Rectangle.Inflate(LoupeRect(), 4, 4))) DrawLoupe(g); // the live loupe grabs the screen, skip it when it can't show
+            if (clip.IntersectsWith(Rectangle.Inflate(HintRect(), 4, 4))) DrawHint(g);
         }
 
         void DrawSelection(Graphics g, Rectangle r)
@@ -265,7 +336,7 @@ namespace Glint
         {
             picker = true; snap = false;
             if (!cursorHidden) { Cursor.Hide(); cursorHidden = true; }
-            dirty = new Rectangle(0, 0, Width, Height);
+            redrawAll = true;
             Update2();
         }
 
@@ -273,7 +344,7 @@ namespace Glint
         {
             picker = false; snap = Settings.Current.Snap;
             if (cursorHidden) { Cursor.Show(); cursorHidden = false; }
-            dirty = new Rectangle(0, 0, Width, Height);
+            redrawAll = true;
             Update2();
         }
 
@@ -479,7 +550,7 @@ namespace Glint
             {
                 Settings.Current.Crosshair = !Settings.Current.Crosshair;
                 Settings.Current.Save();
-                dirty = new Rectangle(0, 0, Width, Height);
+                redrawAll = true;
                 Update2();
             }
             else if (e.KeyCode == Keys.Space && dragging && !moving) { moving = true; moveFrom = cur; Update2(); }
