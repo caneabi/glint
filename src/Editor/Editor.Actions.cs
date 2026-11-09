@@ -188,6 +188,7 @@ namespace Glint
             prevPicked = picked; picked = c;
             string t = Colors.Format(c, Settings.Current.ColorFormat);
             Clipboard.SetText(t);
+            Sounds.Play(Sounds.Kind.Pick);
             statusNote = L.T("Kopiert: ") + t;
             if (prevPicked.HasValue)
                 statusNote += string.Format(L.T("   ·   Kontrast zu {0}: {1:0.00}:1 (WCAG)   Lc {2:0} (APCA)"), Colors.Hex(prevPicked.Value), Colors.Wcag(c, prevPicked.Value), Colors.Apca(c, prevPicked.Value));

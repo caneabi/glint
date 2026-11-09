@@ -102,6 +102,7 @@ namespace Glint
             menu.Items.Add(capture("Area", "square-dashed"));
             menu.Items.Add(capture("Scrolling", "chevrons-down"));
             menu.Items.Add(capture("Ocr", "scan-text"));
+            menu.Items.Add(capture("Color", "droplet"));
             var more = MenuKit.Sub(L.T("Mehr"), true);
             more.Image = MenuKit.IconImage("ellipsis");
             more.DropDownItems.Add(capture("Repeat", "repeat"));
@@ -240,6 +241,12 @@ namespace Glint
                 case "Area": Select(false, r2 => { lastArea = r2.Item1; Deliver(r2.Item2, true); }); break;
                 case "Window": Select(true, r2 => Deliver(r2.Item2, false)); break;
                 case "Ocr": Select(false, r2 => OcrAndCopy(r2.Item2)); break;
+                case "Color":
+                    if (Overlay.Active) break;
+                    var picker = new Overlay(false, true);
+                    Overlay.Active = true;
+                    picker.Show();
+                    break;
                 case "Scrolling": Select(false, r2 => { r2.Item2.Dispose(); StartScrolling(r2.Item1); }); break;
             }
         }

@@ -8,7 +8,7 @@ namespace Glint
     // Generated at runtime, so the exe ships no audio files.
     static class Sounds
     {
-        public enum Kind { Screenshot, Upload, Copy }
+        public enum Kind { Screenshot, Upload, Copy, Pick }
         const int Rate = 44100;
         public static bool Muted; // test hook
         static readonly Dictionary<Kind, SoundPlayer> Players = new Dictionary<Kind, SoundPlayer>();
@@ -39,6 +39,22 @@ namespace Glint
             }
         }
 
+        // A short rising sweep, like sipping the color up.
+        static void Sweep(List<short> o, double start, double from, double to, double length, double volume)
+        {
+            int at = (int)(start * Rate), n = (int)(length * Rate);
+            while (o.Count < at + n) o.Add(0);
+            double phase = 0;
+            for (int i = 0; i < n; i++)
+            {
+                double t = i / (double)n, freq = from * Math.Pow(to / from, t * t);
+                phase += 2 * Math.PI * freq / Rate;
+                double env = Math.Min(1, i / (Rate * .004)) * Math.Pow(1 - t, 1.6);
+                int v = o[at + i] + (int)(Math.Sin(phase) * env * volume * short.MaxValue);
+                o[at + i] = (short)Math.Max(short.MinValue, Math.Min(short.MaxValue, v));
+            }
+        }
+
         public static byte[] Wav(Kind kind)
         {
             var s = new List<short>();
@@ -47,6 +63,10 @@ namespace Glint
                 case Kind.Screenshot:
                     Click(s, 0, .03, .5, 3);
                     Click(s, .055, .05, .35, 7);
+                    break;
+                case Kind.Pick:
+                    Sweep(s, 0, 260, 1150, .13, .22);
+                    Tone(s, .1, 1760, .06, .07);
                     break;
                 case Kind.Copy:
                     Tone(s, 0, 1046, .07, .16);
@@ -74,7 +94,7 @@ namespace Glint
         static bool Enabled(Kind kind)
         {
             var c = Settings.Current;
-            return kind == Kind.Screenshot ? c.SoundScreenshot : kind == Kind.Upload ? c.SoundUpload : c.SoundCopy;
+            return kind == Kind.Screenshot ? c.SoundScreenshot : kind == Kind.Upload ? c.SoundUpload : c.SoundCopy; // picking counts as copying
         }
 
         public static void Play(Kind kind) { if (Enabled(kind)) Preview(kind); }
