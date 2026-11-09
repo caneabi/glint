@@ -12,9 +12,12 @@ namespace Glint
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = Begin(e);
-            Ui.Pill(g, new RectangleF(0, 0, LW - 1, LH - 1), On ? Ui.Accent : Ui.Well, LH - 1);
-            float x = On ? LW - LH + 2 : 2;
-            g.FillEllipse(Brushes.White, x, 2, LH - 5, LH - 5);
+            int w = Width, h = Height, m = Ui.S(2);
+            Color track = On ? Ui.Accent : Ui.Well;
+            Ui.Disc(g, 0, 0, h, track);
+            Ui.Disc(g, w - h, 0, h, track);
+            Ui.Block(g, h / 2, 0, w - h, h, track);
+            Ui.Disc(g, On ? w - h + m : m, m, h - m * 2, Color.White);
         }
     }
 }

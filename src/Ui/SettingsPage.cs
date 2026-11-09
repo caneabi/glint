@@ -9,7 +9,7 @@ namespace Glint
     class SettingsPage : Panel
     {
         public const int CardX = Ui.Pad, CardY = 72, RowH = Ui.RowH, LabelW = 170;
-        class Row { public string Label; public Control[] Right; public Control Stretch, Block; public float LabelWidth; public int H = RowH; }
+        class Row { public string Label; public Control[] Right; public Control Stretch, Block; public float LabelWidth; public int H = RowH, Gap; }
         readonly string title, subtitle;
         readonly List<Row> rows = new List<Row>();
 
@@ -20,7 +20,14 @@ namespace Glint
         }
 
         public int RowCount { get { return rows.Count; } }
-        public int ContentHeight { get { return Ui.S(CardY + rows.Sum(r => r.H) + 16); } }
+        public int ContentHeight { get { return Ui.S(CardY + rows.Sum(r => r.H + r.Gap) + 16); } }
+
+        // The next row starts a new card.
+        public void BeginGroup() { nextGap = GroupGap; }
+        const int GroupGap = 14;
+        int nextGap;
+
+        Row Take(Row r) { r.Gap = nextGap; nextGap = 0; rows.Add(r); return r; }
 
         public void Reset()
         {
@@ -34,7 +41,7 @@ namespace Glint
         // A label with a full-width control below it.
         public void AddBlock(string label, Control block, int height)
         {
-            rows.Add(new Row { Label = label, Right = new Control[0], Block = block, H = height });
+            Take(new Row { Label = label, Right = new Control[0], Block = block, H = height });
             Controls.Add(block);
             Reflow();
         }
@@ -44,7 +51,7 @@ namespace Glint
 
         void Add(string label, Control stretch, Control[] right)
         {
-            rows.Add(new Row { Label = label, Right = right, Stretch = stretch });
+            Take(new Row { Label = label, Right = right, Stretch = stretch });
             foreach (var c in right) Controls.Add(c);
             if (stretch != null) Controls.Add(stretch);
             Reflow();
@@ -56,6 +63,7 @@ namespace Glint
             for (int i = 0; i < rows.Count; i++)
             {
                 var row = rows[i];
+                cursor += row.Gap;
                 int top = Ui.S(cursor), rowH = Ui.S(RowH), x = Width - Ui.S(CardX + 14), gap = Ui.S(6);
                 cursor += row.H;
                 if (row.Block != null)
@@ -103,15 +111,22 @@ namespace Glint
             float w = Width / Ui.F;
             using (var b = new SolidBrush(Ui.Text)) g.DrawString(title, Ui.Title, b, CardX - 2, 4);
             if (subtitle != null) using (var b = new SolidBrush(Ui.Dim)) g.DrawString(subtitle, Ui.Small, b, CardX - 1, 38);
-            if (rows.Count > 0) Ui.Pill(g, new RectangleF(CardX, CardY, w - CardX * 2, rows.Sum(r => r.H)), Ui.Card, Ui.CardRadius);
-            int y = CardY - rows.Select(r => r.H).FirstOrDefault();
+            int cardTop = CardY, cardH = 0;
             for (int i = 0; i < rows.Count; i++)
             {
-                y += i == 0 ? rows[0].H : rows[i - 1].H;
-                if (i > 0) Ui.Hairline(g, CardX + 14, y, (int)w - CardX, y);
+                if (i > 0 && rows[i].Gap > 0) { Ui.Pill(g, new RectangleF(CardX, cardTop, w - CardX * 2, cardH), Ui.Card, Ui.CardRadius); cardTop += cardH + rows[i].Gap; cardH = 0; }
+                cardH += rows[i].H;
+            }
+            if (rows.Count > 0) Ui.Pill(g, new RectangleF(CardX, cardTop, w - CardX * 2, cardH), Ui.Card, Ui.CardRadius);
+            int y = CardY;
+            for (int i = 0; i < rows.Count; i++)
+            {
+                y += rows[i].Gap;
+                if (i > 0 && rows[i].Gap == 0) Ui.Hairline(g, CardX + 14, y, (int)w - CardX, y);
                 using (var b = new SolidBrush(Ui.Text))
                 using (var sf = new StringFormat { LineAlignment = StringAlignment.Center, Trimming = StringTrimming.EllipsisCharacter, FormatFlags = StringFormatFlags.NoWrap })
                     g.DrawString(rows[i].Label, Ui.Font, b, new RectangleF(CardX + 14, y, Math.Max(10, rows[i].LabelWidth), RowH), sf);
+                y += rows[i].H;
             }
             base.OnPaint(e);
         }

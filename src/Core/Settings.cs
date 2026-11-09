@@ -20,10 +20,10 @@ namespace Glint
         static string FilePath { get { return FileOverride ?? Path.Combine(Dir, "settings.ini"); } }
         public static readonly Dictionary<string, string> Labels = new Dictionary<string, string> {
             {"Fullscreen","Vollbild"},{"Area","Bereich"},{"Window","Fenster wählen"},{"ActiveWindow","Aktives Fenster"},
-            {"Ocr","Text erkennen (OCR)"},{"Scrolling","Scrolling-Aufnahme"},{"Repeat","Bereich wiederholen"},{"Delayed","Vollbild in 3 s"},{"Upload","Bereich hochladen"}};
+            {"Ocr","Text erkennen (OCR)"},{"Scrolling","Scrolling-Aufnahme"},{"Repeat","Bereich wiederholen"},{"Delayed","Vollbild in 3 s"},{"Upload","Bereich hochladen"},{"Color","Farbe aufnehmen"}};
         public Dictionary<string, string> Hotkeys = new Dictionary<string, string> {
             {"Fullscreen","Ctrl+Shift+D1"},{"Area","PrintScreen"},{"Window","Ctrl+Shift+D3"},{"ActiveWindow","Ctrl+Shift+D4"},
-            {"Ocr","Ctrl+Shift+D5"},{"Scrolling","Ctrl+Shift+D6"},{"Repeat","Ctrl+Shift+D7"},{"Delayed","Ctrl+Shift+D8"},{"Upload",""}};
+            {"Ocr","Ctrl+Shift+D5"},{"Scrolling","Ctrl+Shift+D6"},{"Repeat","Ctrl+Shift+D7"},{"Delayed","Ctrl+Shift+D8"},{"Upload",""},{"Color","Ctrl+Shift+D9"}};
         public string SaveDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Glint");
         public string After = "thumbnail"; // editor | copy | thumbnail
         public bool Snap = true, Freeze = true, Crosshair = false;
@@ -36,11 +36,17 @@ namespace Glint
         public static readonly Dictionary<string, string> PreviewLabels = new Dictionary<string, string> {
             {"copy","Schwebendes Fenster: Kopieren"},{"edit","Schwebendes Fenster: Editor"},{"pin","Schwebendes Fenster: Anpinnen"},
             {"save","Schwebendes Fenster: Speichern"},{"upload","Schwebendes Fenster: Hochladen"},{"ocr","Schwebendes Fenster: Text"},{"close","Schwebendes Fenster: Schließen"}};
+        public static readonly Dictionary<string, string> PanelLabels = new Dictionary<string, string> {
+            {"copy","Farbpanel: Kopieren"},{"close","Farbpanel: Schließen"},{"pick","Farbpanel: Neue Farbe"},{"swap","Farbpanel: Tauschen"}};
+        public Dictionary<string, string> PanelKeys = new Dictionary<string, string> {
+            {"copy","Ctrl+C"},{"close","Escape"},{"pick","Space"},{"swap","X"}};
         public Dictionary<string, string> PreviewKeys = new Dictionary<string, string> {
             {"copy","Escape"},{"edit","Return"},{"pin","Ctrl+P"},{"save","Ctrl+S"},{"upload","Ctrl+U"},{"ocr","Ctrl+T"},{"close","Delete"}};
         public string Format = "auto"; // auto | png | jpg | webp
-        public string ColorFormat = "hex"; // hex | rgb | oklch
+        public string ColorFormat = "hex"; // one of Colors.Formats
+        public string ColorAfter = "panel"; // panel | copy
         public int MaxScroll = 20000;
+        public List<string> ColorHistory = new List<string>();
         public static Settings Current = new Settings();
 
         static readonly object SaveGate = new object();
@@ -89,6 +95,7 @@ namespace Glint
                     }
                     else if (k.StartsWith("hotkey.")) Current.Hotkeys[k.Substring(7)] = v;
                     else if (k.StartsWith("preview.")) Current.PreviewKeys[k.Substring(8)] = v;
+                    else if (k.StartsWith("panel.") && k != "panel.copyClose") Current.PanelKeys[k.Substring(6)] = v;
                     else if (k == "snap") Current.Snap = v == "1";
                     else if (k == "freeze") Current.Freeze = v == "1";
                     else if (k == "crosshair") Current.Crosshair = v == "1";
@@ -98,7 +105,9 @@ namespace Glint
                     else if (k == "after") Current.After = v;
                     else if (k == "format") Current.Format = v;
                     else if (k == "colorFormat") Current.ColorFormat = v;
+                    else if (k == "colorAfter") Current.ColorAfter = v == "copy" ? "copy" : "panel";
                     else if (k == "maxScroll") int.TryParse(v, out Current.MaxScroll);
+                    else if (k == "colorHistory") Current.ColorHistory = v.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToList();
                 }
                 if (!v2 && Current.Hotkeys["Area"] == "Ctrl+Shift+D2") Current.Hotkeys["Area"] = "PrintScreen";
                 if (!v3)
@@ -132,9 +141,10 @@ namespace Glint
                 }
             foreach (var p in Hotkeys) sb.AppendLine("hotkey." + p.Key + "=" + p.Value);
             foreach (var p in PreviewKeys) sb.AppendLine("preview." + p.Key + "=" + p.Value);
+            foreach (var p in PanelKeys) sb.AppendLine("panel." + p.Key + "=" + p.Value);
             sb.AppendLine("snap=" + (Snap ? "1" : "0")).AppendLine("freeze=" + (Freeze ? "1" : "0")).AppendLine("crosshair=" + (Crosshair ? "1" : "0"));
             sb.AppendLine("saveDir=" + SaveDir).AppendLine("after=" + After).AppendLine("format=" + Format)
-              .AppendLine("colorFormat=" + ColorFormat).AppendLine("maxScroll=" + MaxScroll).AppendLine("jpegQuality=" + JpegQuality).AppendLine("outputScale=" + OutputScale);
+              .AppendLine("colorFormat=" + ColorFormat).AppendLine("colorAfter=" + ColorAfter).AppendLine("maxScroll=" + MaxScroll).AppendLine("colorHistory=" + string.Join(",", ColorHistory)).AppendLine("jpegQuality=" + JpegQuality).AppendLine("outputScale=" + OutputScale);
             // Written next to the file first, a crash can't leave half a settings file.
             lock (SaveGate)
             {

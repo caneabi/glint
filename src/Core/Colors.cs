@@ -17,10 +17,19 @@ namespace Glint
     {
         static double Lin(int v) { double c = v / 255.0; return c <= .04045 ? c / 12.92 : Math.Pow((c + .055) / 1.055, 2.4); }
         public static string Hex(Color c) { return "#" + c.R.ToString("X2") + c.G.ToString("X2") + c.B.ToString("X2"); }
+        public static readonly string[] Formats = { "hex", "rgb", "hsl", "hsb", "oklch" };
+
         public static string Format(Color c, string f)
         {
             var inv = System.Globalization.CultureInfo.InvariantCulture;
             if (f == "rgb") return "rgb(" + c.R + ", " + c.G + ", " + c.B + ")";
+            if (f == "hsl")
+                return string.Format(inv, "hsl({0:0}, {1:0}%, {2:0}%)", c.GetHue(), c.GetSaturation() * 100, c.GetBrightness() * 100);
+            if (f == "hsb")
+            {
+                double max = Math.Max(c.R, Math.Max(c.G, c.B)) / 255.0, min = Math.Min(c.R, Math.Min(c.G, c.B)) / 255.0;
+                return string.Format(inv, "hsb({0:0}, {1:0}%, {2:0}%)", c.GetHue(), max == 0 ? 0 : (max - min) / max * 100, max * 100);
+            }
             if (f == "oklch")
             {
                 double r = Lin(c.R), g = Lin(c.G), b = Lin(c.B);

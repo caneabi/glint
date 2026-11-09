@@ -104,9 +104,9 @@ namespace Glint
             else if (hover >= 0 || hoverClose) Chip.Draw(g, hoverClose ? L.T("Schließen") : Tips[hover], imgRect, KeyOf(hoverClose ? "close" : Ids[hover]));
             if (inside)
             {
-                using (var b = new SolidBrush(hoverDrag ? Color.FromArgb(235, 60, 60, 65) : Color.FromArgb(170, 28, 28, 28))) g.FillEllipse(b, dragRect);
+                Ui.Disc(g, dragRect.X, dragRect.Y, dragRect.Width, hoverDrag ? Color.FromArgb(235, 60, 60, 65) : Color.FromArgb(170, 28, 28, 28));
                 Icons.DrawLucide(g, "grip-vertical", dragRect.X + dragRect.Width / 2f, dragRect.Y + dragRect.Height / 2f, K(13), Math.Max(1.1f, k * 1.25f), Color.White);
-                using (var b = new SolidBrush(hoverClose ? Color.FromArgb(253, 83, 76) : Color.FromArgb(170, 28, 28, 28))) g.FillEllipse(b, closeRect);
+                Ui.Disc(g, closeRect.X, closeRect.Y, closeRect.Width, hoverClose ? Color.FromArgb(253, 83, 76) : Color.FromArgb(170, 28, 28, 28));
                 Icons.DrawLucide(g, "x", closeRect.X + closeRect.Width / 2f, closeRect.Y + closeRect.Height / 2f, K(13), Math.Max(1.1f, k * 1.25f), Color.White);
             }
         }
@@ -226,7 +226,7 @@ namespace Glint
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
-            if (e.Button == MouseButtons.Right && rects[Array.IndexOf(Ids, "upload")].Contains(e.Location)) { Uploader.ShowMenu(() => img); return; }
+            if (e.Button == MouseButtons.Right && rects[Array.IndexOf(Ids, "upload")].Contains(e.Location)) { Uploader.ShowMenu(d => Uploader.Run(img, d)); return; }
             if (e.Button != MouseButtons.Left) return;
             if (inside && closeRect.Contains(e.Location)) { Close(); return; }
             if (dragRect.Contains(e.Location) || ((ModifierKeys & Keys.Control) != 0 && imgRect.Contains(e.Location))) { dragFrom = e.Location; return; }

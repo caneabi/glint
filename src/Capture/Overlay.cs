@@ -4,6 +4,7 @@ using System.Drawing;
 using System.Drawing.Drawing2D;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
@@ -14,12 +15,18 @@ namespace Glint
         public Action<Tuple<Rectangle, Bitmap>> Done;
         static readonly Color Accent = Color.FromArgb(255, 94, 91);
         readonly bool frozen;
+        readonly bool pickOnly; // opened as color picker, not from snipping
+        bool picker; // round loupe, Tab toggles it while snipping
+        bool cursorHidden;
         readonly Bitmap shot, dim; // frozen mode only
         readonly Rectangle virt;
         readonly List<Native.WinInfo> windows;
         bool snap, dragging, moving;
         Point start, cur, moveFrom;
-        Rectangle dirty = Rectangle.Empty;
+        // What the last frame drew, so the next one only repaints what moved.
+        bool redrawAll = true;
+        Rectangle lastLoupe, lastHint, lastHighlight;
+        Point lastCur;
         const int Cells = 15, Cell = 8, Loupe = Cells * Cell, InfoH = 30;
         // live mode
         IntPtr dib, memDc, oldBmp, bits;
@@ -27,11 +34,12 @@ namespace Glint
 
         public static bool Active;
 
-        public Overlay(bool windowMode)
+        public Overlay(bool windowMode, bool pickColor = false)
         {
             var s = Settings.Current;
             frozen = s.Freeze;
-            snap = windowMode || s.Snap;
+            picker = pickOnly = pickColor;
+            snap = !picker && (windowMode || s.Snap);
             virt = SystemInformation.VirtualScreen;
             windows = Native.VisibleWindows();
             if (frozen)
@@ -47,7 +55,8 @@ namespace Glint
             FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false; TopMost = true;
             StartPosition = FormStartPosition.Manual; Bounds = virt;
             KeyPreview = true; Cursor = Cursors.Cross;
-            SetStyle(ControlStyles.Opaque | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint | ControlStyles.OptimizedDoubleBuffer, true);
+            // No WinForms double buffer: for a window this big it allocates a new buffer on every paint.
+            SetStyle(ControlStyles.Opaque | ControlStyles.AllPaintingInWmPaint | ControlStyles.UserPaint, true);
             cur = new Point(Cursor.Position.X - virt.X, Cursor.Position.Y - virt.Y);
         }
 
@@ -60,26 +69,34 @@ namespace Glint
         {
             base.OnShown(e);
             Native.SetWindowPos(Handle, new IntPtr(-1), virt.X, virt.Y, virt.Width, virt.Height, 0x40);
+            // One lasting back buffer, frames only redraw and copy what changed.
+            var info = new Native.BITMAPINFO { Size = 40, Width = virt.Width, Height = -virt.Height, Planes = 1, BitCount = 32 };
+            memDc = Native.CreateCompatibleDC(IntPtr.Zero);
+            dib = Native.CreateDIBSection(memDc, ref info, 0, out bits, IntPtr.Zero, 0);
+            oldBmp = Native.SelectObject(memDc, dib);
+            buffer = new Bitmap(virt.Width, virt.Height, virt.Width * 4, PixelFormat.Format32bppPArgb, bits);
             if (!frozen)
             {
                 Native.SetWindowDisplayAffinity(Handle, 0x11); // WDA_EXCLUDEFROMCAPTURE
-                var info = new Native.BITMAPINFO { Size = 40, Width = virt.Width, Height = -virt.Height, Planes = 1, BitCount = 32 };
-                memDc = Native.CreateCompatibleDC(IntPtr.Zero);
-                dib = Native.CreateDIBSection(memDc, ref info, 0, out bits, IntPtr.Zero, 0);
-                oldBmp = Native.SelectObject(memDc, dib);
-                buffer = new Bitmap(virt.Width, virt.Height, virt.Width * 4, PixelFormat.Format32bppPArgb, bits);
-                Present(new Rectangle(0, 0, virt.Width, virt.Height));
+                Present(new Rectangle(0, 0, virt.Width, virt.Height), true);
             }
+            else Invalidate();
+            if (picker) { Cursor.Hide(); cursorHidden = true; } // the loupe is the cursor
             Activate();
+            Native.ForceForeground(Handle);
+            Focus();
         }
 
-        void Present(Rectangle clip)
+        void Present(Rectangle clip, bool full = false)
         {
+            clip.Intersect(new Rectangle(0, 0, virt.Width, virt.Height));
+            if (clip.Width <= 0 || clip.Height <= 0) return;
             using (var g = Graphics.FromImage(buffer))
             {
                 g.SetClip(clip);
                 DrawScene(g, clip);
             }
+            if (!full && Native.UpdateLayeredDirty(Handle, memDc, clip)) return;
             var size = new Size(virt.Width, virt.Height); var src = Point.Empty; var pos = virt.Location;
             var blend = new Native.BLENDFUNCTION { Op = 0, Alpha = 255, Format = 1 };
             Native.UpdateLayeredWindow(Handle, IntPtr.Zero, ref pos, ref size, memDc, ref src, 0, ref blend, 2);
@@ -111,48 +128,163 @@ namespace Glint
             return snap ? HoverWindow() : Rectangle.Empty;
         }
 
+        const int PickD = 150, PickCell = 10;
+
         Rectangle LoupeRect()
         {
+            if (picker) return new Rectangle(cur.X - PickD / 2 - 4, cur.Y - PickD / 2 - 4, PickD + 8, PickD + 48);
             int x = cur.X + 20, y = cur.Y + 20, h = Loupe + InfoH;
             if (x + Loupe > Width) x = cur.X - Loupe - 20;
             if (y + h > Height) y = cur.Y - h - 20;
             return new Rectangle(x, y, Loupe, h);
         }
 
+        static readonly Font HintFont = new Font("Segoe UI", 8.5f), KeyFont = new Font("Segoe UI Semibold", 8f);
+        static readonly Bitmap Measure = new Bitmap(1, 1);
+        const int HintH = 34, HintPad = 10, CapH = 20, CapGap = 6, ItemGap = 14;
+
+        // Key, label, whether it's switched on.
+        List<Tuple<string, string, bool>> HintItems()
+        {
+            if (picker)
+            {
+                var pick = new List<Tuple<string, string, bool>> {
+                    Tuple.Create("Esc", L.T("Abbrechen"), false), Tuple.Create(L.T("Klick"), L.T("Aufnehmen"), false), Tuple.Create(L.T("Pfeile"), L.T("Feinjustieren"), false) };
+                if (!pickOnly) pick.Add(Tuple.Create("Tab", L.T("Zurück"), true));
+                return pick;
+            }
+            var items = new List<Tuple<string, string, bool>> {
+                Tuple.Create("Esc", L.T("Abbrechen"), false),
+                Tuple.Create("W", "Snap", snap),
+                Tuple.Create("C", L.T("Fadenkreuz"), Settings.Current.Crosshair),
+                Tuple.Create("Tab", L.T("Farbwähler"), false) };
+            if (dragging) items.Insert(1, Tuple.Create(L.T("Leertaste"), L.T("Verschieben"), moving));
+            return items;
+        }
+
+        string hintKey;
+        int hintWidth;
+
+        int HintWidth(List<Tuple<string, string, bool>> items)
+        {
+            string key = string.Join("|", items.Select(i => i.Item1 + i.Item2));
+            if (key == hintKey) return hintWidth; // measuring text every frame adds up
+            hintKey = key;
+            using (var g = Graphics.FromImage(Measure))
+            {
+                float w = HintPad * 2 - ItemGap;
+                foreach (var i in items) w += g.MeasureString(i.Item1, KeyFont).Width + 10 + CapGap + g.MeasureString(i.Item2, HintFont).Width + ItemGap;
+                return hintWidth = (int)Math.Ceiling(w);
+            }
+        }
+
         Rectangle HintRect()
         {
             var b = Screen.FromPoint(new Point(cur.X + virt.X, cur.Y + virt.Y)).Bounds;
-            return new Rectangle(b.X - virt.X + (b.Width - 620) / 2, b.Y - virt.Y + 18, 620, 34);
+            int w = HintWidth(HintItems());
+            return new Rectangle(b.X - virt.X + (b.Width - w) / 2, b.Y - virt.Y + 18, w, HintH);
+        }
+
+        // Label above or inside the selection, see DrawSelection.
+        static Rectangle LabelArea(Rectangle r) { return new Rectangle(r.X - 2, r.Y - 34, 200, 68); }
+
+        // A growing selection only changes along its edges, the inside is the same picture.
+        static void EdgeStrips(List<Rectangle> parts, Rectangle a, Rectangle b)
+        {
+            const int m = 6;
+            var u = Rectangle.Union(a, b);
+            parts.Add(Rectangle.FromLTRB(Math.Min(a.Left, b.Left) - m, u.Top - m, Math.Max(a.Left, b.Left) + m, u.Bottom + m));
+            parts.Add(Rectangle.FromLTRB(Math.Min(a.Right, b.Right) - m, u.Top - m, Math.Max(a.Right, b.Right) + m, u.Bottom + m));
+            parts.Add(Rectangle.FromLTRB(u.Left - m, Math.Min(a.Top, b.Top) - m, u.Right + m, Math.Max(a.Top, b.Top) + m));
+            parts.Add(Rectangle.FromLTRB(u.Left - m, Math.Min(a.Bottom, b.Bottom) - m, u.Right + m, Math.Max(a.Bottom, b.Bottom) + m));
         }
 
         void Update2()
         {
+            var parts = new List<Rectangle>();
+            var loupe = Rectangle.Inflate(LoupeRect(), 2, 2);
+            var hint = Rectangle.Inflate(HintRect(), 40, 0); // width changes with the items
             var r = Highlight();
-            var next = Rectangle.Union(Rectangle.Inflate(LoupeRect(), 2, 2), HintRect());
-            if (!r.IsEmpty) next = Rectangle.Union(next, Rectangle.Inflate(r, 6, 6));
-            if (!r.IsEmpty) next = Rectangle.Union(next, new Rectangle(r.X - 2, r.Y - 34, 190, 34));
-            if (Settings.Current.Crosshair)
+            if (redrawAll) { parts.Add(new Rectangle(0, 0, Width, Height)); redrawAll = false; }
+            else
             {
-                next = Rectangle.Union(next, new Rectangle(0, cur.Y - 1, Width, 3));
-                next = Rectangle.Union(next, new Rectangle(cur.X - 1, 0, 3, Height));
+                parts.Add(lastLoupe); parts.Add(loupe);
+                if (hint != lastHint) { parts.Add(lastHint); parts.Add(hint); }
+                if (r != lastHighlight)
+                {
+                    if (dragging && !r.IsEmpty && !lastHighlight.IsEmpty) EdgeStrips(parts, lastHighlight, r);
+                    else
+                    {
+                        // a different snapped window: its whole area turns from dim to clear
+                        if (!lastHighlight.IsEmpty) parts.Add(Rectangle.Inflate(lastHighlight, 6, 6));
+                        if (!r.IsEmpty) parts.Add(Rectangle.Inflate(r, 6, 6));
+                    }
+                    if (!lastHighlight.IsEmpty) parts.Add(LabelArea(lastHighlight));
+                    if (!r.IsEmpty) parts.Add(LabelArea(r));
+                }
+                if (Settings.Current.Crosshair && cur != lastCur)
+                {
+                    parts.Add(new Rectangle(0, lastCur.Y - 1, Width, 3)); parts.Add(new Rectangle(lastCur.X - 1, 0, 3, Height));
+                    parts.Add(new Rectangle(0, cur.Y - 1, Width, 3)); parts.Add(new Rectangle(cur.X - 1, 0, 3, Height));
+                }
             }
-            var all = dirty.IsEmpty ? next : Rectangle.Union(dirty, next);
-            dirty = next;
-            if (frozen) Invalidate(all);
-            else if (buffer != null) Present(all);
+            lastLoupe = loupe; lastHint = hint; lastHighlight = r; lastCur = cur;
+            foreach (var part in Merge(parts)) Render(part);
+        }
+
+        // Overlapping parts become one, far apart parts stay separate.
+        static List<Rectangle> Merge(List<Rectangle> parts)
+        {
+            var list = parts.Where(p => p.Width > 0 && p.Height > 0).ToList();
+            for (bool merged = true; merged;)
+            {
+                merged = false;
+                for (int i = 0; i < list.Count && !merged; i++)
+                    for (int j = i + 1; j < list.Count; j++)
+                        if (list[i].IntersectsWith(list[j])) { list[i] = Rectangle.Union(list[i], list[j]); list.RemoveAt(j); merged = true; break; }
+            }
+            return list;
+        }
+
+        // Draws straight away instead of waiting for WM_PAINT, so frames don't pile up.
+        void Render(Rectangle clip)
+        {
+            clip.Intersect(new Rectangle(0, 0, virt.Width, virt.Height));
+            if (clip.Width <= 0 || clip.Height <= 0) return;
+            if (buffer == null || !IsHandleCreated) { Invalidate(clip); return; }
+            if (!frozen) { Present(clip); return; }
+            using (var g = Graphics.FromImage(buffer))
+            {
+                g.SetClip(clip);
+                DrawScene(g, clip);
+            }
+            IntPtr hdc = Native.GetDC(Handle);
+            Native.BitBlt(hdc, clip.X, clip.Y, clip.Width, clip.Height, memDc, clip.X, clip.Y, 0x00CC0020);
+            Native.ReleaseDC(Handle, hdc);
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            if (frozen) DrawScene(e.Graphics, e.ClipRectangle);
+            if (!frozen) return;
+            var clip = e.ClipRectangle;
+            clip.Intersect(new Rectangle(0, 0, virt.Width, virt.Height));
+            if (buffer == null || clip.Width <= 0 || clip.Height <= 0) { DrawScene(e.Graphics, e.ClipRectangle); return; }
+            using (var g = Graphics.FromImage(buffer))
+            {
+                g.SetClip(clip);
+                DrawScene(g, clip);
+            }
+            IntPtr hdc = e.Graphics.GetHdc();
+            Native.BitBlt(hdc, clip.X, clip.Y, clip.Width, clip.Height, memDc, clip.X, clip.Y, 0x00CC0020);
+            e.Graphics.ReleaseHdc(hdc);
         }
 
         void DrawScene(Graphics g, Rectangle clip)
         {
             var r = Highlight();
             g.CompositingMode = CompositingMode.SourceCopy;
-            if (frozen) g.DrawImage(dim, clip, clip, GraphicsUnit.Pixel);
-            else using (var b = new SolidBrush(Color.FromArgb(120, 0, 0, 0))) g.FillRectangle(b, clip);
+            if (frozen) g.DrawImage(picker ? shot : dim, clip, clip, GraphicsUnit.Pixel);
+            else using (var b = new SolidBrush(Color.FromArgb(picker ? 1 : 120, 0, 0, 0))) g.FillRectangle(b, clip);
             bool any = r.Width > 0 && r.Height > 0;
             if (any)
             {
@@ -169,8 +301,8 @@ namespace Glint
                     g.DrawLine(p, cur.X, 0, cur.X, Height);
                 }
             if (any) DrawSelection(g, r);
-            DrawLoupe(g);
-            DrawHint(g);
+            if (clip.IntersectsWith(Rectangle.Inflate(LoupeRect(), 4, 4))) DrawLoupe(g); // the live loupe grabs the screen, skip it when it can't show
+            if (clip.IntersectsWith(Rectangle.Inflate(HintRect(), 4, 4))) DrawHint(g);
         }
 
         void DrawSelection(Graphics g, Rectangle r)
@@ -192,8 +324,97 @@ namespace Glint
             }
         }
 
+        Color Sample(bool darkest)
+        {
+            var p = new Point(cur.X + virt.X, cur.Y + virt.Y);
+            using (var b = frozen ? Imaging.Crop(shot, new Rectangle(cur.X - 10, cur.Y - 10, 21, 21)) : Imaging.Grab(new Rectangle(p.X - 10, p.Y - 10, 21, 21), false))
+                return darkest ? Imaging.Darkest(b, new Point(b.Width / 2, b.Height / 2)) : b.GetPixel(b.Width / 2, b.Height / 2);
+        }
+
+        // Swaps the square loupe for the round picker without leaving the overlay.
+        void EnterPicker()
+        {
+            picker = true; snap = false;
+            if (!cursorHidden) { Cursor.Hide(); cursorHidden = true; }
+            redrawAll = true;
+            Update2();
+        }
+
+        void LeavePicker()
+        {
+            picker = false; snap = Settings.Current.Snap;
+            if (cursorHidden) { Cursor.Show(); cursorHidden = false; }
+            redrawAll = true;
+            Update2();
+        }
+
+        void Pick(Color c)
+        {
+            Clipboard.SetText(Colors.Format(c, Settings.Current.ColorFormat));
+            Close();
+            if (Settings.Current.ColorAfter == "copy") Sounds.Play(Sounds.Kind.Pick);
+            else ColorPanel.Open(c); // plays the sound as it appears
+        }
+
+        // Round magnifier that replaces the cursor while picking.
+        void DrawPickLoupe(Graphics g)
+        {
+            int cells = PickD / PickCell;
+            var circle = new Rectangle(cur.X - PickD / 2, cur.Y - PickD / 2, PickD, PickD);
+            var srcR = new Rectangle(cur.X - cells / 2, cur.Y - cells / 2, cells, cells);
+            Color c = Color.Black;
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var shadow = new SolidBrush(Color.FromArgb(60, 0, 0, 0))) g.FillEllipse(shadow, Rectangle.Inflate(circle, 4, 4));
+            using (var path = new GraphicsPath())
+            {
+                path.AddEllipse(circle);
+                var st = g.Save();
+                g.SetClip(path, CombineMode.Intersect);
+                g.InterpolationMode = InterpolationMode.NearestNeighbor;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
+                var dest = new Rectangle(circle.X, circle.Y, cells * PickCell, cells * PickCell);
+                if (frozen)
+                {
+                    g.DrawImage(shot, dest, srcR, GraphicsUnit.Pixel);
+                    if (new Rectangle(0, 0, shot.Width, shot.Height).Contains(cur)) c = shot.GetPixel(cur.X, cur.Y);
+                }
+                else using (var live = Imaging.Grab(new Rectangle(srcR.X + virt.X, srcR.Y + virt.Y, cells, cells), false))
+                {
+                    g.DrawImage(live, dest, new Rectangle(0, 0, cells, cells), GraphicsUnit.Pixel);
+                    c = live.GetPixel(cells / 2, cells / 2);
+                }
+                g.PixelOffsetMode = PixelOffsetMode.Default;
+                using (var grid = new Pen(Color.FromArgb(22, 128, 128, 128)))
+                    for (int i = 1; i < cells; i++)
+                    {
+                        g.DrawLine(grid, dest.X + i * PickCell, dest.Y, dest.X + i * PickCell, dest.Bottom);
+                        g.DrawLine(grid, dest.X, dest.Y + i * PickCell, dest.Right, dest.Y + i * PickCell);
+                    }
+                var center = new Rectangle(dest.X + cells / 2 * PickCell, dest.Y + cells / 2 * PickCell, PickCell, PickCell);
+                g.DrawRectangle(Pens.Black, Rectangle.Inflate(center, 1, 1));
+                g.DrawRectangle(Pens.White, center);
+                g.Restore(st);
+            }
+            // The ring shows the color under the center pixel.
+            g.SmoothingMode = SmoothingMode.AntiAlias;
+            using (var p = new Pen(c, 7)) g.DrawEllipse(p, Rectangle.Inflate(circle, -3, -3));
+            using (var p = new Pen(Color.FromArgb(90, 0, 0, 0))) g.DrawEllipse(p, circle);
+            using (var p = new Pen(Color.FromArgb(70, 255, 255, 255))) g.DrawEllipse(p, Rectangle.Inflate(circle, -7, -7));
+            string hex = Colors.Hex(c);
+            using (var f = new Font("Segoe UI Semibold", 9f))
+            {
+                var size = g.MeasureString(hex, f);
+                var pill = new RectangleF(cur.X - (size.Width + 32) / 2, circle.Bottom + 10, size.Width + 32, 26);
+                using (var path = Renderer.Round(pill, 26)) using (var b = new SolidBrush(Color.FromArgb(235, 28, 28, 30))) g.FillPath(b, path);
+                using (var b = new SolidBrush(c)) g.FillEllipse(b, pill.X + 8, pill.Y + 7, 12, 12);
+                using (var p = new Pen(Color.FromArgb(80, 255, 255, 255))) g.DrawEllipse(p, pill.X + 8, pill.Y + 7, 12, 12);
+                g.DrawString(hex, f, Brushes.White, pill.X + 24, pill.Y + 5);
+            }
+        }
+
         void DrawLoupe(Graphics g)
         {
+            if (picker) { DrawPickLoupe(g); return; }
             var r = LoupeRect();
             var dest = new Rectangle(r.X, r.Y, Loupe, Loupe);
             var srcR = new Rectangle(cur.X - Cells / 2, cur.Y - Cells / 2, Cells, Cells);
@@ -242,16 +463,31 @@ namespace Glint
         {
             var r = HintRect();
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var path = Renderer.Round(r, 20)) using (var b = new SolidBrush(Color.FromArgb(225, 28, 28, 28))) g.FillPath(b, path);
-            g.SmoothingMode = SmoothingMode.None;
-            string s = L.T("Ziehen: Bereich  ·  Klick: Fenster  ·  W: Snap ") + (snap ? L.T("an") : L.T("aus")) + L.T("  ·  C: Fadenkreuz  ·  Leertaste: verschieben  ·  Tab: Farbe  ·  Esc");
-            using (var f = new Font("Segoe UI", 8.5f))
+            using (var path = Renderer.Round(r, HintH)) using (var b = new SolidBrush(Color.FromArgb(225, 28, 28, 28))) g.FillPath(b, path);
+            float x = r.X + HintPad, capY = r.Y + (HintH - CapH) / 2f;
             using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
-                g.DrawString(s, f, Brushes.Gainsboro, r, sf);
+            using (var left = new StringFormat { LineAlignment = StringAlignment.Center })
+                foreach (var i in HintItems())
+                {
+                    // Lit keycaps show what's switched on.
+                    float cw = g.MeasureString(i.Item1, KeyFont).Width + 10;
+                    var cap = new RectangleF(x, capY, cw, CapH);
+                    using (var path = Renderer.Round(cap, 8)) using (var b = new SolidBrush(i.Item3 ? Accent : Color.FromArgb(68, 68, 74))) g.FillPath(b, path);
+                    g.DrawString(i.Item1, KeyFont, i.Item3 ? Brushes.Black : Brushes.White, cap, sf);
+                    x += cw + CapGap;
+                    float lw = g.MeasureString(i.Item2, HintFont).Width;
+                    using (var b = new SolidBrush(Color.FromArgb(200, 200, 205))) g.DrawString(i.Item2, HintFont, b, new RectangleF(x, r.Y, lw + 2, HintH), left);
+                    x += lw + ItemGap;
+                }
         }
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
+            if (picker)
+            {
+                if (e.Button == MouseButtons.Left) Pick(Sample((ModifierKeys & Keys.Shift) != 0)); else Close();
+                return;
+            }
             if (e.Button == MouseButtons.Right)
             {
                 if (dragging) { dragging = false; Update2(); } else Close();
@@ -314,13 +550,13 @@ namespace Glint
             {
                 Settings.Current.Crosshair = !Settings.Current.Crosshair;
                 Settings.Current.Save();
-                dirty = new Rectangle(0, 0, Width, Height);
+                redrawAll = true;
                 Update2();
             }
-            else if (e.KeyCode == Keys.Space && dragging && !moving) { moving = true; moveFrom = cur; }
+            else if (e.KeyCode == Keys.Space && dragging && !moving) { moving = true; moveFrom = cur; Update2(); }
         }
 
-        protected override void OnKeyUp(KeyEventArgs e) { if (e.KeyCode == Keys.Space) moving = false; }
+        protected override void OnKeyUp(KeyEventArgs e) { if (e.KeyCode == Keys.Space) { moving = false; Update2(); } }
 
         protected override bool ProcessCmdKey(ref Message m, Keys k)
         {
@@ -332,14 +568,10 @@ namespace Glint
                 Native.SetCursorPos(c.X + (code == Keys.Left ? -step : code == Keys.Right ? step : 0), c.Y + (code == Keys.Up ? -step : code == Keys.Down ? step : 0));
                 return true;
             }
-            if (code == Keys.Tab)
+            if (code == Keys.Tab && !pickOnly && !dragging) { if (picker) LeavePicker(); else EnterPicker(); return true; }
+            if (picker && (code == Keys.Tab || code == Keys.Return || code == Keys.Space))
             {
-                Color c;
-                var p = new Point(cur.X + virt.X, cur.Y + virt.Y);
-                using (var b = frozen ? Imaging.Crop(shot, new Rectangle(cur.X - 10, cur.Y - 10, 21, 21)) : Imaging.Grab(new Rectangle(p.X - 10, p.Y - 10, 21, 21), false))
-                    c = (k & Keys.Shift) != 0 ? Imaging.Darkest(b, new Point(b.Width / 2, b.Height / 2)) : b.GetPixel(b.Width / 2, b.Height / 2);
-                string t = Colors.Format(c, Settings.Current.ColorFormat);
-                Clipboard.SetText(t); Close(); Toast.Show(L.T("Farbe kopiert: ") + t);
+                Pick(Sample((k & Keys.Shift) != 0));
                 return true;
             }
             return base.ProcessCmdKey(ref m, k);
@@ -351,6 +583,18 @@ namespace Glint
             g.SetClip(clip);
             DrawScene(g, clip);
             dragging = false;
+        }
+
+        // Test hook: moves the mouse and waits for the frame like a real move would.
+        public double TestMoves(int count)
+        {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 0; i < count; i++)
+            {
+                OnMouseMove(new MouseEventArgs(MouseButtons.None, 0, 200 + (i % 2) * 900 + i * 7, 300 + (i % 3) * 250, 0));
+                Update();
+            }
+            return sw.Elapsed.TotalMilliseconds / count;
         }
 
         public void Simulate(Point a, Point b)
@@ -365,6 +609,7 @@ namespace Glint
             if (d)
             {
                 Active = false;
+                if (cursorHidden) { Cursor.Show(); cursorHidden = false; }
                 if (shot != null) { shot.Dispose(); dim.Dispose(); }
                 if (buffer != null) buffer.Dispose();
                 if (memDc != IntPtr.Zero)

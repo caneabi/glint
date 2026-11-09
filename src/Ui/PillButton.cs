@@ -12,7 +12,7 @@ namespace Glint
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = Begin(e);
-            Ui.Pill(g, new RectangleF(0, 0, LW - 1, LH - 1), hot ? Color.FromArgb(72, 72, 78) : Ui.Well, Ui.ControlRadius);
+            Ui.Pill(g, new RectangleF(0, 0, LW, LH), hot ? Color.FromArgb(72, 72, 78) : Ui.Well, Ui.ControlRadius);
             Ui.Center(g, Caption, Ui.Small, Ui.Text, new RectangleF(8, 0, LW - 16, LH));
         }
     }

@@ -35,7 +35,7 @@ namespace Glint
         {
             Ui.Prepare(e.Graphics);
             e.Graphics.ScaleTransform(Ui.F, Ui.F);
-            Ui.Pill(e.Graphics, new RectangleF(0, 0, Width / Ui.F - 1, Height / Ui.F - 1), Ui.Well, Ui.ControlRadius);
+            Ui.Pill(e.Graphics, new RectangleF(0, 0, Width / Ui.F, Height / Ui.F), Ui.Well, Ui.ControlRadius);
         }
     }
 }

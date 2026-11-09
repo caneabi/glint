@@ -35,7 +35,7 @@ namespace Glint
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = Begin(e);
-            Ui.Pill(g, new RectangleF(0, 0, LW - 1, LH - 1), hot ? Ui.Well : Ui.Card, 12);
+            Ui.Pill(g, new RectangleF(0, 0, LW, LH), hot ? Ui.Well : Ui.Card, 12);
             if (copied) Icons.DrawLucide(g, "check", LW / 2f, LH / 2f, 14, 1.8f, Ui.Accent);
             else Ui.Center(g, Variable, Mono, hot ? Ui.Text : Color.FromArgb(205, 205, 210), new RectangleF(0, 0, LW, LH));
         }
@@ -52,8 +52,8 @@ namespace Glint
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = Begin(e);
-            Ui.Pill(g, new RectangleF(0, 0, LW - 1, LH - 1), Current != null ? Current() : Ui.Well, Ui.ControlRadius);
-            using (var path = Renderer.Round(new RectangleF(.5f, .5f, LW - 2, LH - 2), Ui.ControlRadius)) using (var p = new Pen(hot ? Ui.Text : Ui.Line)) g.DrawPath(p, path);
+            Ui.Pill(g, new RectangleF(0, 0, LW, LH), Current != null ? Current() : Ui.Well, Ui.ControlRadius);
+            using (var path = Renderer.Round(new RectangleF(.5f, .5f, LW - 1, LH - 1), Ui.ControlRadius)) using (var p = new Pen(hot ? Ui.Text : Ui.Line)) g.DrawPath(p, path);
         }
     }
 }

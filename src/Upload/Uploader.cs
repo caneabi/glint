@@ -41,26 +41,39 @@ namespace Glint
             Run(b, d);
         }
 
-        public static async void Run(Bitmap b, Destination d)
+        // Uploads a copy and puts the link on the clipboard. False: uploaded, but the clipboard was locked.
+        public static async Task<bool> Upload(Bitmap b, Destination d, System.Threading.CancellationToken cancel = default(System.Threading.CancellationToken))
         {
             var copy = Imaging.Crop(b, new Rectangle(0, 0, b.Width, b.Height));
-            Toast.Show(L.T("Lädt hoch…"), 15000);
             try
             {
                 string url = await Task.Run(() =>
                 {
                     string ext, mime;
                     var data = Encode(copy, out ext, out mime);
-                    return Send(d, data, ext, mime, copy.Width, copy.Height);
+                    HttpSend.Cancel = cancel;
+                    try { return Send(d, data, ext, mime, copy.Width, copy.Height); }
+                    finally { HttpSend.Cancel = default(System.Threading.CancellationToken); }
                 });
                 Log.Info("Upload nach " + d.Name + ": " + url);
                 Sounds.Play(Sounds.Kind.Upload);
-                // The upload worked, a locked clipboard must not report it as failed.
-                try { Clipboard.SetText(url); Toast.Show(L.T("Link kopiert"), 2000); }
-                catch (System.Runtime.InteropServices.ExternalException ex) { Toast.Error(L.T("Hochgeladen, Link steht im Log"), "Zwischenablage", ex); }
+                try { Clipboard.SetText(url); return true; }
+                catch (System.Runtime.InteropServices.ExternalException ex) { Log.Error("Zwischenablage", ex); return false; }
             }
-            catch (Exception ex) { Toast.Error(L.T("Upload fehlgeschlagen"), "Upload nach " + d.Name + " (" + d.TypeName + ")", ex); }
             finally { copy.Dispose(); }
+        }
+
+        public static async void Run(Bitmap b, Destination d)
+        {
+            using (var cancel = new System.Threading.CancellationTokenSource())
+            try
+            {
+                Toast.Action(L.T("Lädt hoch… Klicken zum Abbrechen"), 120000, cancel.Cancel);
+                if (await Upload(b, d, cancel.Token)) Toast.Show(L.T("Link kopiert"), 2000);
+                else Toast.Error(L.T("Hochgeladen, Link steht im Log"), "Zwischenablage", null);
+            }
+            catch (OperationCanceledException) { Toast.Show(L.T("Upload abgebrochen"), 2000); }
+            catch (Exception ex) { Toast.Error(L.T("Upload fehlgeschlagen"), "Upload nach " + d.Name + " (" + d.TypeName + ")", ex); }
         }
 
         public static byte[] Encode(Bitmap b, out string ext, out string mime)
@@ -87,7 +100,7 @@ namespace Glint
             return url.Trim();
         }
 
-        public static void ShowMenu(Func<Bitmap> image, bool fresh = false)
+        public static void ShowMenu(Action<Destination> pick)
         {
             var menu = new ContextMenuStrip();
             MenuKit.Style(menu, true);
@@ -95,7 +108,7 @@ namespace Glint
             foreach (var d in Settings.Current.Destinations)
             {
                 var dest = d;
-                var item = MenuKit.Item(d.Name, () => { var img = image(); Run(img, dest); if (fresh) img.Dispose(); });
+                var item = MenuKit.Item(d.Name, () => pick(dest));
                 item.Checked = d == active;
                 menu.Items.Add(item);
             }

@@ -17,10 +17,11 @@ namespace Glint
     {
         public static bool NoSave; // test hook
         const int SideW = 200, TopH = 36;
-        static readonly string[] PageIcons = { "sun", "crop", "keyboard", "image", "volume-2", "download", "cloud-upload" };
+        static readonly string[] PageIcons = { "sun", "crop", "keyboard", "image", "volume-2", "download", "cloud-upload", "info" };
         string[] PageNames;
         readonly List<SettingsPage> pages = new List<SettingsPage>();
-        readonly Dictionary<string, KeyRecorder> boxes = new Dictionary<string, KeyRecorder>(), previewBoxes = new Dictionary<string, KeyRecorder>();
+        readonly Dictionary<string, KeyRecorder> boxes = new Dictionary<string, KeyRecorder>(), previewBoxes = new Dictionary<string, KeyRecorder>(), panelBoxes = new Dictionary<string, KeyRecorder>();
+        readonly Dictionary<KeyRecorder, Destination> destRecorders = new Dictionary<KeyRecorder, Destination>();
         Rectangle closeRect;
         int current, hoverItem = -1; bool hoverClose;
 
@@ -44,6 +45,7 @@ namespace Glint
             var s = Settings.Current;
             foreach (var b in boxes) s.Hotkeys[b.Key] = b.Value.Value;
             foreach (var b in previewBoxes) s.PreviewKeys[b.Key] = b.Value.Value;
+            foreach (var b in panelBoxes) s.PanelKeys[b.Key] = b.Value.Value;
         }
 
         // Rebuilds every page in the current language, the window stays open.
@@ -52,8 +54,8 @@ namespace Glint
             StoreKeys();
             int page = current;
             SuspendLayout();
-            foreach (var old in pages) { Controls.Remove(old); old.Dispose(); }
-            pages.Clear(); boxes.Clear(); previewBoxes.Clear();
+            foreach (var old in pages) { var host = old.Parent; Controls.Remove(host); host.Dispose(); }
+            pages.Clear(); boxes.Clear(); previewBoxes.Clear(); panelBoxes.Clear(); destRecorders.Clear();
             BuildPages();
             SelectPage(page);
             ResumeLayout();
@@ -63,7 +65,7 @@ namespace Glint
         void BuildPages()
         {
             Text = L.T("Glint – Einstellungen");
-            PageNames = new[] { L.T("Allgemein"), L.T("Aufnahme"), L.T("Tastenkürzel"), L.T("Schwebendes Fenster"), L.T("Töne"), L.T("Ausgabe"), "Upload" };
+            PageNames = new[] { L.T("Allgemein"), L.T("Aufnahme"), L.T("Tastenkürzel"), L.T("Schwebendes Fenster"), L.T("Töne"), L.T("Ausgabe"), "Upload", "Info" };
             var s = Settings.Current;
             var size = new Size(ClientSize.Width - Ui.S(SideW), ClientSize.Height - Ui.S(TopH));
 
@@ -96,18 +98,6 @@ namespace Glint
             var channel = new Segmented(new[] { "stable", "nightly" }, new[] { "Stable", "Nightly" }, s.UpdateChannel, 150);
             channel.Changed = () => { s.UpdateChannel = channel.Value; s.Save(); };
             p.AddRow(L.T("Update-Kanal"), channel);
-            var checkNow = new PillButton(L.T("Jetzt suchen"), 110);
-            checkNow.Changed = () => Updater.Check(true);
-            p.AddRow(L.T("Version ") + Updater.CurrentText, checkNow);
-            var logs = new PillButton(L.T("Öffnen"), 110);
-            logs.Changed = Log.Open;
-            p.AddRow(L.T("Logs öffnen"), logs);
-            var setup = new PillButton(L.T("Öffnen"), 110);
-            setup.Changed = () => { Close(); if (Tray.Instance != null) Tray.Instance.RunSetupSoon(); };
-            p.AddRow(L.T("Einrichtung"), setup);
-            var quit = new PillButton(L.T("Beenden…"), 110);
-            quit.Changed = () => { Close(); if (Tray.Instance != null) Tray.Instance.Quit(); };
-            p.AddRow(L.T("Glint beenden"), quit);
 
             p = NewPage(L.T("Aufnahme"), size, L.T("Wie Aufnahmen ablaufen."));
             var after = new Segmented(new[] { "thumbnail", "editor", "copy" }, new[] { L.T("Fenster"), "Editor", L.T("Kopieren") }, s.After, 230);
@@ -119,9 +109,12 @@ namespace Glint
             p.AddRow(L.T("Bildschirm einfrieren"), freeze);
             var cross = new Toggle(s.Crosshair); cross.Changed = () => s.Crosshair = cross.On;
             p.AddRow(L.T("Großes Fadenkreuz"), cross);
-            var color = new Segmented(new[] { "hex", "rgb", "oklch" }, new[] { "HEX", "RGB", "OKLCH" }, s.ColorFormat, 230);
+            var color = new Segmented(Colors.Formats, new[] { "HEX", "RGB", "HSL", "HSB", "OKLCH" }, s.ColorFormat, 300);
             color.Changed = () => s.ColorFormat = color.Value;
             p.AddRow(L.T("Farbformat"), color);
+            var colorAfter = new Segmented(new[] { "panel", "copy" }, new[] { "Panel", L.T("Nur kopieren") }, s.ColorAfter, 230);
+            colorAfter.Changed = () => s.ColorAfter = colorAfter.Value;
+            p.AddRow(L.T("Nach Farbaufnahme"), colorAfter);
             string[] heights = { "20000", "50000", "100000", "200000" };
             string nearest = heights.OrderBy(h => Math.Abs(int.Parse(h) - s.MaxScroll)).First();
             var scroll = new Segmented(heights, new[] { "20k", "50k", "100k", "200k" }, nearest, 230);
@@ -130,7 +123,9 @@ namespace Glint
             p.AddBlock(L.T("Hintergrund bei Fensteraufnahmen"), new WindowBgPicker(), 134);
 
             p = NewPage(L.T("Tastenkürzel"), size, L.T("Klicken und Taste drücken. Gilt überall in Windows."));
-            foreach (var kv in Settings.Labels) AddRecorder(p, boxes, kv.Key, L.T(kv.Value), s.Hotkeys.ContainsKey(kv.Key) ? s.Hotkeys[kv.Key] : "");
+            foreach (var kv in Settings.Labels) AddRecorder(p, boxes, kv.Key, L.T(kv.Value), s.Hotkeys.ContainsKey(kv.Key) ? s.Hotkeys[kv.Key] : "", true);
+            p.BeginGroup();
+            foreach (var kv in Settings.PanelLabels) AddRecorder(p, panelBoxes, kv.Key, L.T(kv.Value), s.PanelKeys.ContainsKey(kv.Key) ? s.PanelKeys[kv.Key] : "");
 
             p = NewPage(L.T("Schwebendes Fenster"), size, L.T("Diese Tasten gelten, solange ein schwebendes Fenster offen ist."));
             var global = new Toggle(s.GlobalKeys);
@@ -156,19 +151,35 @@ namespace Glint
             };
             p.AddStretch(L.T("Speicherordner"), folder);
             var fmt = new Segmented(new[] { "auto", "png", "jpg", "webp" }, new[] { "Auto", "PNG", "JPEG", "WebP" }, s.Format, 230);
-            fmt.Changed = () => s.Format = fmt.Value;
             p.AddRow(L.T("Dateiformat"), fmt);
             var quality = new Slider(10, 100, 5, s.JpegQuality, 230);
             quality.Changed = () => s.JpegQuality = quality.Value;
             p.AddRow(L.T("JPEG-Qualität"), quality);
+            quality.Enabled = s.Format == "auto" || s.Format == "jpg"; // auto can pick JPEG
+            fmt.Changed = () => { s.Format = fmt.Value; quality.Enabled = fmt.Value == "auto" || fmt.Value == "jpg"; };
             var scale = new Segmented(new[] { "100", "75", "50", "25" }, new[] { "100 %", "75 %", "50 %", "25 %" }, s.OutputScale.ToString(), 230);
             scale.Changed = () => s.OutputScale = int.Parse(scale.Value);
             p.AddRow(L.T("Ausgabegröße"), scale);
-            p.AddBlock(L.T("Dateiname beim Speichern"), new FileNameEditor(s.FileNameSave, false, ".png", v => s.FileNameSave = v), 158);
-            p.AddBlock(L.T("Dateiname beim Hochladen"), new FileNameEditor(s.FileNameUpload, true, ".png", v => s.FileNameUpload = v), 158);
+            p.AddBlock(L.T("Dateiname beim Speichern"), new FileNameEditor(s.FileNameSave, false, ".png", v => s.FileNameSave = v), 104);
+            p.AddBlock(L.T("Dateiname beim Hochladen"), new FileNameEditor(s.FileNameUpload, true, ".png", v => s.FileNameUpload = v), 104);
+            p.AddBlock(L.T("Variablen"), new FileNameVars(), 124);
 
             uploadPage = NewPage("Upload", size, L.T("Der Schalter wählt das aktive Ziel, Hotkeys laden direkt hoch."));
             BuildUploadPage();
+
+            p = NewPage("Info", size, L.T("Version, Logs und Einrichtung."));
+            var checkNow = new PillButton(L.T("Jetzt suchen"), 110);
+            checkNow.Changed = () => Updater.Check(true);
+            p.AddRow(L.T("Version ") + Updater.CurrentText, checkNow);
+            var logs = new PillButton(L.T("Öffnen"), 110);
+            logs.Changed = Log.Open;
+            p.AddRow(L.T("Logs öffnen"), logs);
+            var setup = new PillButton(L.T("Öffnen"), 110);
+            setup.Changed = () => { Close(); if (Tray.Instance != null) Tray.Instance.RunSetupSoon(); };
+            p.AddRow(L.T("Einrichtung"), setup);
+            var quit = new PillButton(L.T("Beenden…"), 110);
+            quit.Changed = () => { Close(); if (Tray.Instance != null) Tray.Instance.Quit(); };
+            p.AddRow(L.T("Glint beenden"), quit);
 
             SelectPage(0);
         }
@@ -219,9 +230,9 @@ namespace Glint
                 var on = new Toggle(d == active);
                 on.Changed = () => { s.ActiveDestination = d.Id; s.Save(); BeginInvoke(new Action(BuildUploadPage)); };
                 var rec = new KeyRecorder(d.Hotkey) { Width = Ui.S(118), Height = Ui.S(28) };
-                rec.Recorded = () => { d.Hotkey = rec.Value; s.Save(); };
-                var clear = new IconButton("x", 24);
-                clear.Changed = () => { rec.Value = ""; d.Hotkey = ""; s.Save(); };
+                rec.Recorded = () => { d.Hotkey = rec.Value; s.Save(); CheckGlobal(rec); };
+                rec.Taken = Tray.Instance != null && Tray.Instance.Failed.Contains("upload:" + d.Id);
+                destRecorders[rec] = d;
                 var edit = new IconButton("pencil", 24);
                 edit.Changed = () =>
                 {
@@ -242,7 +253,7 @@ namespace Glint
                     s.Save();
                     BeginInvoke(new Action(BuildUploadPage));
                 };
-                uploadPage.AddRow(d.Name + "  ·  " + d.TypeName, rec, clear, edit, del, on);
+                uploadPage.AddRow(d.Name + "  ·  " + d.TypeName, rec, edit, del, on);
             }
             var names = new[] { "Zipline", "R2", "S3", "Discord", L.T("Eigene"), "ShareX" };
             var types = new[] { "zipline", "r2", "s3", "discord", "custom", "sharex" };
@@ -272,33 +283,71 @@ namespace Glint
                 pills[i] = pill;
             }
             uploadPage.AddRow(L.T("Neu"), pills);
+            if (uploadPage.Parent != null) Fit(uploadPage);
         }
 
         SettingsPage NewPage(string title, Size size, string subtitle)
         {
-            var p = new SettingsPage(title, size, subtitle) { Location = new Point(Ui.S(SideW), Ui.S(TopH)), Visible = false };
-            pages.Add(p); Controls.Add(p);
+            // Each page scrolls inside its own host when it's taller than the window.
+            var host = new PassPanel { Location = new Point(Ui.S(SideW), Ui.S(TopH)), Size = size, AutoScroll = true, Visible = false };
+            var p = new SettingsPage(title, size, subtitle) { Location = Point.Empty };
+            host.Controls.Add(p);
+            pages.Add(p); Controls.Add(host);
             return p;
         }
 
-        void AddRecorder(SettingsPage page, Dictionary<string, KeyRecorder> group, string key, string label, string value)
+        static void Fit(SettingsPage p)
+        {
+            var host = p.Parent;
+            p.Height = Math.Max(p.ContentHeight, host.ClientSize.Height);
+            p.Width = host.ClientSize.Width;
+        }
+
+        // Global hotkeys and upload hotkeys share one pool, a key can only do one of them.
+        void CheckGlobal(KeyRecorder rec)
+        {
+            var s = Settings.Current;
+            string moved = null;
+            if (rec.Value != "")
+            {
+                foreach (var kv in boxes)
+                    if (kv.Value != rec && kv.Value.Value == rec.Value) { kv.Value.Value = ""; kv.Value.Taken = false; moved = L.T(Settings.Labels[kv.Key]); }
+                foreach (var kv in destRecorders)
+                    if (kv.Key != rec && kv.Key.Value == rec.Value) { kv.Key.Value = ""; kv.Key.Taken = false; kv.Value.Hotkey = ""; s.Save(); moved = "Upload " + kv.Value.Name; }
+            }
+            bool ours = s.Hotkeys.ContainsValue(rec.Value) || s.Destinations.Any(d => d.Hotkey == rec.Value);
+            rec.Taken = rec.Value != "" && !ours && Tray.Instance != null && Tray.Instance.IsTaken(rec.Value);
+            rec.Invalidate();
+            if (rec.Taken) ShowBanner(L.T("Diese Tasten nutzt schon Windows oder eine andere App"), 4000, true, null);
+            else if (moved != null) ShowBanner(string.Format(L.T("Bei „{0}“ entfernt"), moved), 3000, false, null);
+        }
+
+        void AddRecorder(SettingsPage page, Dictionary<string, KeyRecorder> group, string key, string label, string value, bool global = false)
         {
             var rec = new KeyRecorder(value) { Width = Ui.S(170), Height = Ui.S(28) };
+            if (global)
+            {
+                rec.Taken = Tray.Instance != null && Tray.Instance.Failed.Contains(key);
+                rec.Recorded = () => CheckGlobal(rec);
+                group[key] = rec;
+                page.AddRow(label, rec);
+                return;
+            }
             rec.Recorded = () =>
             {
                 // One key, one action per group.
+                if (rec.Value == "") return;
                 foreach (var other in group.Values) if (other != rec && other.Value == rec.Value) other.Value = "";
             };
-            var clear = new IconButton("x", 24);
-            clear.Changed = () => rec.Value = "";
             group[key] = rec;
-            page.AddRow(label, rec, clear);
+            page.AddRow(label, rec);
         }
 
         public void SelectPage(int i)
         {
             current = i;
-            for (int k = 0; k < pages.Count; k++) pages[k].Visible = k == i;
+            for (int k = 0; k < pages.Count; k++) pages[k].Parent.Visible = k == i;
+            Fit(pages[i]);
             Invalidate();
         }
 
@@ -306,7 +355,7 @@ namespace Glint
         {
             base.OnResize(e);
             closeRect = new Rectangle((int)(ClientSize.Width / Ui.F) - 42, 0, 42, TopH - 2);
-            foreach (var p in pages) p.Size = new Size(ClientSize.Width - Ui.S(SideW), ClientSize.Height - Ui.S(TopH));
+            foreach (var p in pages) { p.Parent.Size = new Size(ClientSize.Width - Ui.S(SideW), ClientSize.Height - Ui.S(TopH)); Fit(p); }
             Invalidate();
         }
 
@@ -319,7 +368,13 @@ namespace Glint
             return closeRect.Contains(l);
         }
 
-        Rectangle ItemRect(int i) { return new Rectangle(12, 56 + i * 38, SideW - 24, 34); }
+        // The last page sits at the bottom of the sidebar like a footer.
+        bool IsFooter(int i) { return i == PageNames.Length - 1; }
+        Rectangle ItemRect(int i)
+        {
+            if (IsFooter(i)) return new Rectangle(12, (int)(ClientSize.Height / Ui.F) - 46, SideW - 24, 32);
+            return new Rectangle(12, 56 + i * 38, SideW - 24, 34);
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -330,6 +385,8 @@ namespace Glint
             Ui.Prepare(g);
             Brand.DrawWordmark(g, 45, 22, 9.5f, Ui.Text, Brand.Pixel);
             Ui.Prepare(g);
+            var footer = ItemRect(PageNames.Length - 1);
+            Ui.Hairline(g, 22, footer.Y - 10, SideW - 22, footer.Y - 10);
             for (int i = 0; i < PageNames.Length; i++)
             {
                 var r = ItemRect(i);
@@ -338,7 +395,12 @@ namespace Glint
                 Icons.DrawLucide(g, PageIcons[i], r.X + 20, r.Y + r.Height / 2f, 16, 1.4f, i == current ? Ui.Text : Ui.Dim);
                 using (var b = new SolidBrush(i == current ? Ui.Text : Ui.Dim))
                 using (var sf = new StringFormat { LineAlignment = StringAlignment.Center })
+                {
                     g.DrawString(PageNames[i], Ui.Small, b, new RectangleF(r.X + 36, r.Y, r.Width - 40, r.Height), sf);
+                    if (IsFooter(i))
+                        using (var v = new SolidBrush(Color.FromArgb(110, 110, 116)))
+                            g.DrawString(Updater.CurrentText, Ui.Small, v, new RectangleF(r.X + 36 + g.MeasureString(PageNames[i], Ui.Small).Width + 4, r.Y, r.Width, r.Height), sf);
+                }
                 if (i == current) using (var b = new SolidBrush(Brand.Pixel)) g.FillRectangle(b, r.Right - 14, r.Y + r.Height / 2 - 3, 6, 6);
             }
             if (hoverClose) using (var b = new SolidBrush(Color.FromArgb(232, 17, 35))) g.FillRectangle(b, closeRect);
@@ -351,6 +413,7 @@ namespace Glint
             var l = Logical(e.Location);
             for (int i = 0; i < PageNames.Length; i++) if (ItemRect(i).Contains(l)) h = i;
             bool c = closeRect.Contains(l);
+            Cursor = h >= 0 || c ? Cursors.Hand : Cursors.Default;
             if (h != hoverItem || c != hoverClose) { hoverItem = h; hoverClose = c; Invalidate(); }
         }
 

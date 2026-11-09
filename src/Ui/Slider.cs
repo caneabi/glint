@@ -28,9 +28,10 @@ namespace Glint
             var g = Begin(e);
             float cy = LH / 2f, kx = 8 + (TrackW - 16) * (Value - min) / (float)(max - min);
             Ui.Pill(g, new RectangleF(0, cy - 2, TrackW, 4), Ui.Well, 4);
-            Ui.Pill(g, new RectangleF(0, cy - 2, kx, 4), Ui.Accent, 4);
-            g.FillEllipse(Brushes.White, kx - 7, cy - 7, 14, 14);
-            Ui.Center(g, Value + " %", Ui.Small, Ui.Text, new RectangleF(TrackW + 4, 0, 48, LH));
+            Ui.Pill(g, new RectangleF(0, cy - 2, kx, 4), Enabled ? Ui.Accent : Ui.Line, 4);
+            int knob = Ui.S(14);
+            Ui.Disc(g, (int)Math.Round(kx * Ui.F) - knob / 2, (Height - knob) / 2, knob, Enabled ? Color.White : Ui.Dim);
+            Ui.Center(g, Value + " %", Ui.Small, Enabled ? Ui.Text : Ui.Dim, new RectangleF(TrackW + 4, 0, 48, LH));
         }
     }
 }

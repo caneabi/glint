@@ -120,11 +120,13 @@ namespace Glint
             int by = Ui.S(FooterH - 54);
             testBtn = new PillButton(L.T("Test-Upload"), 120, 36) { BackColor = Ui.Bg, Location = new Point(Ui.S(Ui.Pad), by), Anchor = AnchorStyles.Bottom | AnchorStyles.Left };
             testBtn.Changed = RunTest;
-            var cancel = new PillButton(L.T("Abbrechen"), 100, 36) { BackColor = Ui.Bg, Location = new Point(ClientSize.Width - Ui.S(Ui.Pad + 110 + 8 + 100), by), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+            var cancel = new PillButton(L.T("Abbrechen"), 100, 36) { BackColor = Ui.Bg, Top = by };
             cancel.Changed = () => { DialogResult = DialogResult.Cancel; Close(); };
-            var ok = new PrimaryButton(L.T("Speichern"), Ui.S(110, 36)) { Location = new Point(ClientSize.Width - Ui.S(Ui.Pad + 110), by), Anchor = AnchorStyles.Bottom | AnchorStyles.Right };
+            var ok = new PrimaryButton(L.T("Speichern"), Ui.S(110, 36)) { Top = by };
             ok.Changed = () => { Apply(target); if (string.IsNullOrWhiteSpace(target.Name)) target.Name = target.TypeName; DialogResult = DialogResult.OK; Close(); };
             footer.Controls.Add(testBtn); footer.Controls.Add(cancel); footer.Controls.Add(ok);
+            okBtn = ok; cancelBtn = cancel;
+            FitPage(body);
             footer.Paint += delegate(object s, PaintEventArgs e)
             {
                 string text = hint ?? status;
@@ -138,12 +140,18 @@ namespace Glint
 
         const int FooterH = 82;
         readonly PassPanel footer;
+        PrimaryButton okBtn;
+        PillButton cancelBtn;
         string hint;
 
         void FitPage(Panel body)
         {
             page.Height = Math.Max(page.ContentHeight, body.ClientSize.Height);
             page.Width = body.ClientSize.Width;
+            if (okBtn == null) return;
+            // Stay flush with the cards when the scrollbar takes room.
+            okBtn.Left = body.ClientSize.Width - Ui.S(Ui.Pad + 110);
+            cancelBtn.Left = okBtn.Left - Ui.S(8 + 100);
         }
         readonly List<Action<Destination>> extras = new List<Action<Destination>>();
 

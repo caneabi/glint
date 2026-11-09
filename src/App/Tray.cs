@@ -18,6 +18,19 @@ namespace Glint
         readonly NotifyIcon icon = new NotifyIcon();
         readonly HotkeySink sink = new HotkeySink();
         readonly List<string> actions = new List<string>();
+        public readonly HashSet<string> Failed = new HashSet<string>(); // actions whose hotkey Windows refused
+
+        // True when another app or Windows already uses the combination.
+        public bool IsTaken(string combo)
+        {
+            Keys k;
+            uint mod, vk;
+            if (!Settings.ParseKeys(combo, out k) || (k & Keys.KeyCode) == Keys.PrintScreen) return false; // the hook gets it first
+            if (!Settings.ParseHotkey(combo, out mod, out vk)) return false;
+            if (!Native.RegisterHotKey(sink.Handle, 0xBFFF, mod | 0x4000, vk)) return true;
+            Native.UnregisterHotKey(sink.Handle, 0xBFFF);
+            return false;
+        }
         Rectangle lastArea = Rectangle.Empty;
         public static Tray Instance;
         public static bool RelaunchRequested;
@@ -102,6 +115,7 @@ namespace Glint
             menu.Items.Add(capture("Area", "square-dashed"));
             menu.Items.Add(capture("Scrolling", "chevrons-down"));
             menu.Items.Add(capture("Ocr", "scan-text"));
+            menu.Items.Add(capture("Color", "droplet"));
             var more = MenuKit.Sub(L.T("Mehr"), true);
             more.Image = MenuKit.IconImage("ellipsis");
             more.DropDownItems.Add(capture("Repeat", "repeat"));
@@ -171,6 +185,7 @@ namespace Glint
         public void RegisterAll()
         {
             SuspendHotkeys();
+            Failed.Clear();
             var failed = new List<string>();
             foreach (var p in Settings.Current.Hotkeys)
             {
@@ -184,7 +199,7 @@ namespace Glint
                 uint mod, vk;
                 if (!Settings.ParseHotkey(p.Value, out mod, out vk)) continue;
                 if (Native.RegisterHotKey(sink.Handle, actions.Count, mod | 0x4000, vk)) actions.Add(p.Key);
-                else { actions.Add(p.Key); failed.Add(L.T(Settings.Labels[p.Key])); }
+                else { actions.Add(p.Key); failed.Add(L.T(Settings.Labels[p.Key])); Failed.Add(p.Key); }
             }
             foreach (var d in Settings.Current.Destinations)
             {
@@ -194,7 +209,7 @@ namespace Glint
                 if ((combo & Keys.KeyCode) == Keys.PrintScreen) { KeyHook.Bindings[combo] = () => Run(action); continue; }
                 uint mod, vk;
                 if (!Settings.ParseHotkey(d.Hotkey, out mod, out vk)) continue;
-                if (!Native.RegisterHotKey(sink.Handle, actions.Count, mod | 0x4000, vk)) failed.Add("Upload " + d.Name);
+                if (!Native.RegisterHotKey(sink.Handle, actions.Count, mod | 0x4000, vk)) { failed.Add("Upload " + d.Name); Failed.Add(action); }
                 actions.Add(action);
             }
             if (failed.Count > 0) Toast.Error(L.T("Hotkey belegt"), "Hotkeys nicht registriert: " + string.Join(", ", failed), null);
@@ -240,6 +255,12 @@ namespace Glint
                 case "Area": Select(false, r2 => { lastArea = r2.Item1; Deliver(r2.Item2, true); }); break;
                 case "Window": Select(true, r2 => Deliver(r2.Item2, false)); break;
                 case "Ocr": Select(false, r2 => OcrAndCopy(r2.Item2)); break;
+                case "Color":
+                    if (Overlay.Active) break;
+                    var picker = new Overlay(false, true);
+                    Overlay.Active = true;
+                    picker.Show();
+                    break;
                 case "Scrolling": Select(false, r2 => { r2.Item2.Dispose(); StartScrolling(r2.Item1); }); break;
             }
         }
@@ -261,13 +282,21 @@ namespace Glint
         }
 
         // Takes ownership of the bitmap.
+        // Returns what was recognized and copied, empty when nothing was found.
+        public static async Task<string> OcrCopy(Bitmap b)
+        {
+            string text = await Ocr.Recognize(b);
+            if (string.IsNullOrWhiteSpace(text)) return "";
+            Clipboard.SetText(text);
+            return text;
+        }
+
         public async void OcrAndCopy(Bitmap b)
         {
             try
             {
-                string text = await Ocr.Recognize(b);
-                if (string.IsNullOrWhiteSpace(text)) { Toast.Show(L.T("Kein Text gefunden")); return; }
-                Clipboard.SetText(text);
+                string text = await OcrCopy(b);
+                if (text == "") { Toast.Show(L.T("Kein Text gefunden")); return; }
                 Toast.Show(L.T("Text kopiert: ") + (text.Length > 48 ? text.Substring(0, 48) + "…" : text));
             }
             catch (Exception ex) { Toast.Error(L.T("Texterkennung fehlgeschlagen"), "OCR", ex); }
