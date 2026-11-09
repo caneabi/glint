@@ -20,6 +20,7 @@ namespace Glint
         bool recording;
         public Action Recorded;
         public bool IsRecording { get { return recording; } }
+        public bool Taken; // another app or Windows holds this combination
         bool clearDown, clearHot;
 
         Rectangle ClearRect { get { int s = Ui.S(24); return new Rectangle(Width - s - Ui.S(2), (Height - s) / 2, s, s); } }
@@ -72,6 +73,7 @@ namespace Glint
             Ui.Pill(g, new RectangleF(0, 0, w, h), recording ? Ui.Accent : Ui.Well, Ui.ControlRadius);
             Ui.Center(g, Text, Ui.Small, recording ? Brand.Dark : !string.IsNullOrEmpty(value) ? Ui.Text : Ui.Dim, CanClear ? new RectangleF(24, 0, w - 48, h) : new RectangleF(6, 0, w - 12, h));
             if (CanClear) Icons.DrawLucide(g, "x", w - 14, h / 2, 12, 1.4f, clearHot ? Ui.Text : Ui.Dim);
+            if (Taken && !recording) using (var path = Renderer.Round(new RectangleF(.75f, .75f, w - 1.5f, h - 1.5f), Ui.ControlRadius)) using (var p = new Pen(Ui.Accent, 1.5f)) g.DrawPath(p, path);
         }
 
         protected override void OnClick(EventArgs e)

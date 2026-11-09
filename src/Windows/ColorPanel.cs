@@ -189,10 +189,21 @@ namespace Glint
 
         protected override bool ProcessCmdKey(ref Message m, Keys k)
         {
-            if (k == Keys.Escape) { Close(); return true; }
-            if (k == Keys.Space || k == Keys.P) { PickAgain(); return true; }
-            if (k == Keys.X) { var t = slots[0]; slots[0] = slots[1]; slots[1] = t; Invalidate(); return true; }
-            if (k == (Keys.Control | Keys.C)) { CopyRow(Math.Max(0, Array.IndexOf(Colors.Formats, Settings.Current.ColorFormat))); return true; }
+            foreach (var p in Settings.Current.PanelKeys)
+            {
+                Keys bound;
+                if (!Settings.ParseKeys(p.Value, out bound) || bound != k) continue;
+                int standard = Math.Max(0, Array.IndexOf(Colors.Formats, Settings.Current.ColorFormat));
+                switch (p.Key)
+                {
+                    case "copy": CopyRow(standard); break;
+                    case "copyClose": CopyRow(standard); Close(); break;
+                    case "close": Close(); break;
+                    case "pick": PickAgain(); break;
+                    case "swap": var t = slots[0]; slots[0] = slots[1]; slots[1] = t; Invalidate(); break;
+                }
+                return true;
+            }
             return base.ProcessCmdKey(ref m, k);
         }
 

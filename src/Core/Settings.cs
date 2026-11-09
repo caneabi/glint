@@ -36,6 +36,10 @@ namespace Glint
         public static readonly Dictionary<string, string> PreviewLabels = new Dictionary<string, string> {
             {"copy","Schwebendes Fenster: Kopieren"},{"edit","Schwebendes Fenster: Editor"},{"pin","Schwebendes Fenster: Anpinnen"},
             {"save","Schwebendes Fenster: Speichern"},{"upload","Schwebendes Fenster: Hochladen"},{"ocr","Schwebendes Fenster: Text"},{"close","Schwebendes Fenster: Schließen"}};
+        public static readonly Dictionary<string, string> PanelLabels = new Dictionary<string, string> {
+            {"copy","Farbpanel: Kopieren"},{"copyClose","Farbpanel: Kopieren und schließen"},{"close","Farbpanel: Schließen"},{"pick","Farbpanel: Neue Farbe"},{"swap","Farbpanel: Tauschen"}};
+        public Dictionary<string, string> PanelKeys = new Dictionary<string, string> {
+            {"copy","Ctrl+C"},{"copyClose",""},{"close","Escape"},{"pick","Space"},{"swap","X"}};
         public Dictionary<string, string> PreviewKeys = new Dictionary<string, string> {
             {"copy","Escape"},{"edit","Return"},{"pin","Ctrl+P"},{"save","Ctrl+S"},{"upload","Ctrl+U"},{"ocr","Ctrl+T"},{"close","Delete"}};
         public string Format = "auto"; // auto | png | jpg | webp
@@ -91,6 +95,7 @@ namespace Glint
                     }
                     else if (k.StartsWith("hotkey.")) Current.Hotkeys[k.Substring(7)] = v;
                     else if (k.StartsWith("preview.")) Current.PreviewKeys[k.Substring(8)] = v;
+                    else if (k.StartsWith("panel.")) Current.PanelKeys[k.Substring(6)] = v;
                     else if (k == "snap") Current.Snap = v == "1";
                     else if (k == "freeze") Current.Freeze = v == "1";
                     else if (k == "crosshair") Current.Crosshair = v == "1";
@@ -136,6 +141,7 @@ namespace Glint
                 }
             foreach (var p in Hotkeys) sb.AppendLine("hotkey." + p.Key + "=" + p.Value);
             foreach (var p in PreviewKeys) sb.AppendLine("preview." + p.Key + "=" + p.Value);
+            foreach (var p in PanelKeys) sb.AppendLine("panel." + p.Key + "=" + p.Value);
             sb.AppendLine("snap=" + (Snap ? "1" : "0")).AppendLine("freeze=" + (Freeze ? "1" : "0")).AppendLine("crosshair=" + (Crosshair ? "1" : "0"));
             sb.AppendLine("saveDir=" + SaveDir).AppendLine("after=" + After).AppendLine("format=" + Format)
               .AppendLine("colorFormat=" + ColorFormat).AppendLine("colorAfter=" + ColorAfter).AppendLine("maxScroll=" + MaxScroll).AppendLine("colorHistory=" + string.Join(",", ColorHistory)).AppendLine("jpegQuality=" + JpegQuality).AppendLine("outputScale=" + OutputScale);

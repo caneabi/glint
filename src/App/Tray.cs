@@ -18,6 +18,19 @@ namespace Glint
         readonly NotifyIcon icon = new NotifyIcon();
         readonly HotkeySink sink = new HotkeySink();
         readonly List<string> actions = new List<string>();
+        public readonly HashSet<string> Failed = new HashSet<string>(); // actions whose hotkey Windows refused
+
+        // True when another app or Windows already uses the combination.
+        public bool IsTaken(string combo)
+        {
+            Keys k;
+            uint mod, vk;
+            if (!Settings.ParseKeys(combo, out k) || (k & Keys.KeyCode) == Keys.PrintScreen) return false; // the hook gets it first
+            if (!Settings.ParseHotkey(combo, out mod, out vk)) return false;
+            if (!Native.RegisterHotKey(sink.Handle, 0xBFFF, mod | 0x4000, vk)) return true;
+            Native.UnregisterHotKey(sink.Handle, 0xBFFF);
+            return false;
+        }
         Rectangle lastArea = Rectangle.Empty;
         public static Tray Instance;
         public static bool RelaunchRequested;
@@ -172,6 +185,7 @@ namespace Glint
         public void RegisterAll()
         {
             SuspendHotkeys();
+            Failed.Clear();
             var failed = new List<string>();
             foreach (var p in Settings.Current.Hotkeys)
             {
@@ -185,7 +199,7 @@ namespace Glint
                 uint mod, vk;
                 if (!Settings.ParseHotkey(p.Value, out mod, out vk)) continue;
                 if (Native.RegisterHotKey(sink.Handle, actions.Count, mod | 0x4000, vk)) actions.Add(p.Key);
-                else { actions.Add(p.Key); failed.Add(L.T(Settings.Labels[p.Key])); }
+                else { actions.Add(p.Key); failed.Add(L.T(Settings.Labels[p.Key])); Failed.Add(p.Key); }
             }
             foreach (var d in Settings.Current.Destinations)
             {
@@ -195,7 +209,7 @@ namespace Glint
                 if ((combo & Keys.KeyCode) == Keys.PrintScreen) { KeyHook.Bindings[combo] = () => Run(action); continue; }
                 uint mod, vk;
                 if (!Settings.ParseHotkey(d.Hotkey, out mod, out vk)) continue;
-                if (!Native.RegisterHotKey(sink.Handle, actions.Count, mod | 0x4000, vk)) failed.Add("Upload " + d.Name);
+                if (!Native.RegisterHotKey(sink.Handle, actions.Count, mod | 0x4000, vk)) { failed.Add("Upload " + d.Name); Failed.Add(action); }
                 actions.Add(action);
             }
             if (failed.Count > 0) Toast.Error(L.T("Hotkey belegt"), "Hotkeys nicht registriert: " + string.Join(", ", failed), null);

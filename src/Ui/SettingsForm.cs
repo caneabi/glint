@@ -20,7 +20,8 @@ namespace Glint
         static readonly string[] PageIcons = { "sun", "crop", "keyboard", "image", "volume-2", "download", "cloud-upload", "info" };
         string[] PageNames;
         readonly List<SettingsPage> pages = new List<SettingsPage>();
-        readonly Dictionary<string, KeyRecorder> boxes = new Dictionary<string, KeyRecorder>(), previewBoxes = new Dictionary<string, KeyRecorder>();
+        readonly Dictionary<string, KeyRecorder> boxes = new Dictionary<string, KeyRecorder>(), previewBoxes = new Dictionary<string, KeyRecorder>(), panelBoxes = new Dictionary<string, KeyRecorder>();
+        readonly Dictionary<KeyRecorder, Destination> destRecorders = new Dictionary<KeyRecorder, Destination>();
         Rectangle closeRect;
         int current, hoverItem = -1; bool hoverClose;
 
@@ -44,6 +45,7 @@ namespace Glint
             var s = Settings.Current;
             foreach (var b in boxes) s.Hotkeys[b.Key] = b.Value.Value;
             foreach (var b in previewBoxes) s.PreviewKeys[b.Key] = b.Value.Value;
+            foreach (var b in panelBoxes) s.PanelKeys[b.Key] = b.Value.Value;
         }
 
         // Rebuilds every page in the current language, the window stays open.
@@ -52,8 +54,8 @@ namespace Glint
             StoreKeys();
             int page = current;
             SuspendLayout();
-            foreach (var old in pages) { Controls.Remove(old); old.Dispose(); }
-            pages.Clear(); boxes.Clear(); previewBoxes.Clear();
+            foreach (var old in pages) { var host = old.Parent; Controls.Remove(host); host.Dispose(); }
+            pages.Clear(); boxes.Clear(); previewBoxes.Clear(); panelBoxes.Clear(); destRecorders.Clear();
             BuildPages();
             SelectPage(page);
             ResumeLayout();
@@ -121,7 +123,9 @@ namespace Glint
             p.AddBlock(L.T("Hintergrund bei Fensteraufnahmen"), new WindowBgPicker(), 134);
 
             p = NewPage(L.T("Tastenkürzel"), size, L.T("Klicken und Taste drücken. Gilt überall in Windows."));
-            foreach (var kv in Settings.Labels) AddRecorder(p, boxes, kv.Key, L.T(kv.Value), s.Hotkeys.ContainsKey(kv.Key) ? s.Hotkeys[kv.Key] : "");
+            foreach (var kv in Settings.Labels) AddRecorder(p, boxes, kv.Key, L.T(kv.Value), s.Hotkeys.ContainsKey(kv.Key) ? s.Hotkeys[kv.Key] : "", true);
+            p.BeginGroup();
+            foreach (var kv in Settings.PanelLabels) AddRecorder(p, panelBoxes, kv.Key, L.T(kv.Value), s.PanelKeys.ContainsKey(kv.Key) ? s.PanelKeys[kv.Key] : "");
 
             p = NewPage(L.T("Schwebendes Fenster"), size, L.T("Diese Tasten gelten, solange ein schwebendes Fenster offen ist."));
             var global = new Toggle(s.GlobalKeys);
@@ -226,7 +230,9 @@ namespace Glint
                 var on = new Toggle(d == active);
                 on.Changed = () => { s.ActiveDestination = d.Id; s.Save(); BeginInvoke(new Action(BuildUploadPage)); };
                 var rec = new KeyRecorder(d.Hotkey) { Width = Ui.S(118), Height = Ui.S(28) };
-                rec.Recorded = () => { d.Hotkey = rec.Value; s.Save(); };
+                rec.Recorded = () => { d.Hotkey = rec.Value; s.Save(); CheckGlobal(rec); };
+                rec.Taken = Tray.Instance != null && Tray.Instance.Failed.Contains("upload:" + d.Id);
+                destRecorders[rec] = d;
                 var edit = new IconButton("pencil", 24);
                 edit.Changed = () =>
                 {
@@ -277,18 +283,56 @@ namespace Glint
                 pills[i] = pill;
             }
             uploadPage.AddRow(L.T("Neu"), pills);
+            if (uploadPage.Parent != null) Fit(uploadPage);
         }
 
         SettingsPage NewPage(string title, Size size, string subtitle)
         {
-            var p = new SettingsPage(title, size, subtitle) { Location = new Point(Ui.S(SideW), Ui.S(TopH)), Visible = false };
-            pages.Add(p); Controls.Add(p);
+            // Each page scrolls inside its own host when it's taller than the window.
+            var host = new PassPanel { Location = new Point(Ui.S(SideW), Ui.S(TopH)), Size = size, AutoScroll = true, Visible = false };
+            var p = new SettingsPage(title, size, subtitle) { Location = Point.Empty };
+            host.Controls.Add(p);
+            pages.Add(p); Controls.Add(host);
             return p;
         }
 
-        void AddRecorder(SettingsPage page, Dictionary<string, KeyRecorder> group, string key, string label, string value)
+        static void Fit(SettingsPage p)
+        {
+            var host = p.Parent;
+            p.Height = Math.Max(p.ContentHeight, host.ClientSize.Height);
+            p.Width = host.ClientSize.Width;
+        }
+
+        // Global hotkeys and upload hotkeys share one pool, a key can only do one of them.
+        void CheckGlobal(KeyRecorder rec)
+        {
+            var s = Settings.Current;
+            string moved = null;
+            if (rec.Value != "")
+            {
+                foreach (var kv in boxes)
+                    if (kv.Value != rec && kv.Value.Value == rec.Value) { kv.Value.Value = ""; kv.Value.Taken = false; moved = L.T(Settings.Labels[kv.Key]); }
+                foreach (var kv in destRecorders)
+                    if (kv.Key != rec && kv.Key.Value == rec.Value) { kv.Key.Value = ""; kv.Key.Taken = false; kv.Value.Hotkey = ""; s.Save(); moved = "Upload " + kv.Value.Name; }
+            }
+            bool ours = s.Hotkeys.ContainsValue(rec.Value) || s.Destinations.Any(d => d.Hotkey == rec.Value);
+            rec.Taken = rec.Value != "" && !ours && Tray.Instance != null && Tray.Instance.IsTaken(rec.Value);
+            rec.Invalidate();
+            if (rec.Taken) ShowBanner(L.T("Diese Tasten nutzt schon Windows oder eine andere App"), 4000, true, null);
+            else if (moved != null) ShowBanner(string.Format(L.T("Bei „{0}“ entfernt"), moved), 3000, false, null);
+        }
+
+        void AddRecorder(SettingsPage page, Dictionary<string, KeyRecorder> group, string key, string label, string value, bool global = false)
         {
             var rec = new KeyRecorder(value) { Width = Ui.S(170), Height = Ui.S(28) };
+            if (global)
+            {
+                rec.Taken = Tray.Instance != null && Tray.Instance.Failed.Contains(key);
+                rec.Recorded = () => CheckGlobal(rec);
+                group[key] = rec;
+                page.AddRow(label, rec);
+                return;
+            }
             rec.Recorded = () =>
             {
                 // One key, one action per group.
@@ -302,7 +346,8 @@ namespace Glint
         public void SelectPage(int i)
         {
             current = i;
-            for (int k = 0; k < pages.Count; k++) pages[k].Visible = k == i;
+            for (int k = 0; k < pages.Count; k++) pages[k].Parent.Visible = k == i;
+            Fit(pages[i]);
             Invalidate();
         }
 
@@ -310,7 +355,7 @@ namespace Glint
         {
             base.OnResize(e);
             closeRect = new Rectangle((int)(ClientSize.Width / Ui.F) - 42, 0, 42, TopH - 2);
-            foreach (var p in pages) p.Size = new Size(ClientSize.Width - Ui.S(SideW), ClientSize.Height - Ui.S(TopH));
+            foreach (var p in pages) { p.Parent.Size = new Size(ClientSize.Width - Ui.S(SideW), ClientSize.Height - Ui.S(TopH)); Fit(p); }
             Invalidate();
         }
 
