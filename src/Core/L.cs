@@ -256,6 +256,7 @@ namespace Glint
             {"Feinjustieren", "Nudge"},
             {"Nur kopieren", "Copy only"},
             {"Farbwähler", "Color picker"},
+            {"Version, Logs und Einrichtung.", "Version, logs and setup."},
             {"Nach Farbaufnahme", "After picking a color"},
             {"Lädt hoch… Klicken zum Abbrechen", "Uploading… click to cancel"},
             {"Upload abgebrochen", "Upload canceled"},

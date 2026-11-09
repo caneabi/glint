@@ -14,7 +14,8 @@ namespace Glint
         public Action<Tuple<Rectangle, Bitmap>> Done;
         static readonly Color Accent = Color.FromArgb(255, 94, 91);
         readonly bool frozen;
-        bool picker; // only picks a color, Tab switches into it while snipping
+        readonly bool pickOnly; // opened as color picker, not from snipping
+        bool picker; // round loupe, Tab toggles it while snipping
         bool cursorHidden;
         readonly Bitmap shot, dim; // frozen mode only
         readonly Rectangle virt;
@@ -33,7 +34,7 @@ namespace Glint
         {
             var s = Settings.Current;
             frozen = s.Freeze;
-            picker = pickColor;
+            picker = pickOnly = pickColor;
             snap = !picker && (windowMode || s.Snap);
             virt = SystemInformation.VirtualScreen;
             windows = Native.VisibleWindows();
@@ -135,8 +136,13 @@ namespace Glint
         // Key, label, whether it's switched on.
         List<Tuple<string, string, bool>> HintItems()
         {
-            if (picker) return new List<Tuple<string, string, bool>> {
-                Tuple.Create("Esc", L.T("Abbrechen"), false), Tuple.Create(L.T("Klick"), L.T("Aufnehmen"), false), Tuple.Create(L.T("Pfeile"), L.T("Feinjustieren"), false) };
+            if (picker)
+            {
+                var pick = new List<Tuple<string, string, bool>> {
+                    Tuple.Create("Esc", L.T("Abbrechen"), false), Tuple.Create(L.T("Klick"), L.T("Aufnehmen"), false), Tuple.Create(L.T("Pfeile"), L.T("Feinjustieren"), false) };
+                if (!pickOnly) pick.Add(Tuple.Create("Tab", L.T("Zurück"), true));
+                return pick;
+            }
             var items = new List<Tuple<string, string, bool>> {
                 Tuple.Create("Esc", L.T("Abbrechen"), false),
                 Tuple.Create("W", "Snap", snap),
@@ -242,6 +248,14 @@ namespace Glint
         {
             picker = true; snap = false;
             if (!cursorHidden) { Cursor.Hide(); cursorHidden = true; }
+            dirty = new Rectangle(0, 0, Width, Height);
+            Update2();
+        }
+
+        void LeavePicker()
+        {
+            picker = false; snap = Settings.Current.Snap;
+            if (cursorHidden) { Cursor.Show(); cursorHidden = false; }
             dirty = new Rectangle(0, 0, Width, Height);
             Update2();
         }
@@ -466,7 +480,7 @@ namespace Glint
                 Native.SetCursorPos(c.X + (code == Keys.Left ? -step : code == Keys.Right ? step : 0), c.Y + (code == Keys.Up ? -step : code == Keys.Down ? step : 0));
                 return true;
             }
-            if (code == Keys.Tab && !picker && !dragging) { EnterPicker(); return true; }
+            if (code == Keys.Tab && !pickOnly && !dragging) { if (picker) LeavePicker(); else EnterPicker(); return true; }
             if (picker && (code == Keys.Tab || code == Keys.Return || code == Keys.Space))
             {
                 Pick(Sample((k & Keys.Shift) != 0));

@@ -17,7 +17,7 @@ namespace Glint
     {
         public static bool NoSave; // test hook
         const int SideW = 200, TopH = 36;
-        static readonly string[] PageIcons = { "sun", "crop", "keyboard", "image", "volume-2", "download", "cloud-upload" };
+        static readonly string[] PageIcons = { "sun", "crop", "keyboard", "image", "volume-2", "download", "cloud-upload", "info" };
         string[] PageNames;
         readonly List<SettingsPage> pages = new List<SettingsPage>();
         readonly Dictionary<string, KeyRecorder> boxes = new Dictionary<string, KeyRecorder>(), previewBoxes = new Dictionary<string, KeyRecorder>();
@@ -63,7 +63,7 @@ namespace Glint
         void BuildPages()
         {
             Text = L.T("Glint – Einstellungen");
-            PageNames = new[] { L.T("Allgemein"), L.T("Aufnahme"), L.T("Tastenkürzel"), L.T("Schwebendes Fenster"), L.T("Töne"), L.T("Ausgabe"), "Upload" };
+            PageNames = new[] { L.T("Allgemein"), L.T("Aufnahme"), L.T("Tastenkürzel"), L.T("Schwebendes Fenster"), L.T("Töne"), L.T("Ausgabe"), "Upload", "Info" };
             var s = Settings.Current;
             var size = new Size(ClientSize.Width - Ui.S(SideW), ClientSize.Height - Ui.S(TopH));
 
@@ -96,19 +96,6 @@ namespace Glint
             var channel = new Segmented(new[] { "stable", "nightly" }, new[] { "Stable", "Nightly" }, s.UpdateChannel, 150);
             channel.Changed = () => { s.UpdateChannel = channel.Value; s.Save(); };
             p.AddRow(L.T("Update-Kanal"), channel);
-            p.BeginGroup();
-            var checkNow = new PillButton(L.T("Jetzt suchen"), 110);
-            checkNow.Changed = () => Updater.Check(true);
-            p.AddRow(L.T("Version ") + Updater.CurrentText, checkNow);
-            var logs = new PillButton(L.T("Öffnen"), 110);
-            logs.Changed = Log.Open;
-            p.AddRow(L.T("Logs öffnen"), logs);
-            var setup = new PillButton(L.T("Öffnen"), 110);
-            setup.Changed = () => { Close(); if (Tray.Instance != null) Tray.Instance.RunSetupSoon(); };
-            p.AddRow(L.T("Einrichtung"), setup);
-            var quit = new PillButton(L.T("Beenden…"), 110);
-            quit.Changed = () => { Close(); if (Tray.Instance != null) Tray.Instance.Quit(); };
-            p.AddRow(L.T("Glint beenden"), quit);
 
             p = NewPage(L.T("Aufnahme"), size, L.T("Wie Aufnahmen ablaufen."));
             var after = new Segmented(new[] { "thumbnail", "editor", "copy" }, new[] { L.T("Fenster"), "Editor", L.T("Kopieren") }, s.After, 230);
@@ -175,6 +162,20 @@ namespace Glint
 
             uploadPage = NewPage("Upload", size, L.T("Der Schalter wählt das aktive Ziel, Hotkeys laden direkt hoch."));
             BuildUploadPage();
+
+            p = NewPage("Info", size, L.T("Version, Logs und Einrichtung."));
+            var checkNow = new PillButton(L.T("Jetzt suchen"), 110);
+            checkNow.Changed = () => Updater.Check(true);
+            p.AddRow(L.T("Version ") + Updater.CurrentText, checkNow);
+            var logs = new PillButton(L.T("Öffnen"), 110);
+            logs.Changed = Log.Open;
+            p.AddRow(L.T("Logs öffnen"), logs);
+            var setup = new PillButton(L.T("Öffnen"), 110);
+            setup.Changed = () => { Close(); if (Tray.Instance != null) Tray.Instance.RunSetupSoon(); };
+            p.AddRow(L.T("Einrichtung"), setup);
+            var quit = new PillButton(L.T("Beenden…"), 110);
+            quit.Changed = () => { Close(); if (Tray.Instance != null) Tray.Instance.Quit(); };
+            p.AddRow(L.T("Glint beenden"), quit);
 
             SelectPage(0);
         }
@@ -322,7 +323,13 @@ namespace Glint
             return closeRect.Contains(l);
         }
 
-        Rectangle ItemRect(int i) { return new Rectangle(12, 56 + i * 38, SideW - 24, 34); }
+        // The last page sits at the bottom of the sidebar like a footer.
+        bool IsFooter(int i) { return i == PageNames.Length - 1; }
+        Rectangle ItemRect(int i)
+        {
+            if (IsFooter(i)) return new Rectangle(12, (int)(ClientSize.Height / Ui.F) - 46, SideW - 24, 32);
+            return new Rectangle(12, 56 + i * 38, SideW - 24, 34);
+        }
 
         protected override void OnPaint(PaintEventArgs e)
         {
@@ -333,6 +340,8 @@ namespace Glint
             Ui.Prepare(g);
             Brand.DrawWordmark(g, 45, 22, 9.5f, Ui.Text, Brand.Pixel);
             Ui.Prepare(g);
+            var footer = ItemRect(PageNames.Length - 1);
+            Ui.Hairline(g, 22, footer.Y - 10, SideW - 22, footer.Y - 10);
             for (int i = 0; i < PageNames.Length; i++)
             {
                 var r = ItemRect(i);
@@ -341,7 +350,12 @@ namespace Glint
                 Icons.DrawLucide(g, PageIcons[i], r.X + 20, r.Y + r.Height / 2f, 16, 1.4f, i == current ? Ui.Text : Ui.Dim);
                 using (var b = new SolidBrush(i == current ? Ui.Text : Ui.Dim))
                 using (var sf = new StringFormat { LineAlignment = StringAlignment.Center })
+                {
                     g.DrawString(PageNames[i], Ui.Small, b, new RectangleF(r.X + 36, r.Y, r.Width - 40, r.Height), sf);
+                    if (IsFooter(i))
+                        using (var v = new SolidBrush(Color.FromArgb(110, 110, 116)))
+                            g.DrawString(Updater.CurrentText, Ui.Small, v, new RectangleF(r.X + 36 + g.MeasureString(PageNames[i], Ui.Small).Width + 4, r.Y, r.Width, r.Height), sf);
+                }
                 if (i == current) using (var b = new SolidBrush(Brand.Pixel)) g.FillRectangle(b, r.Right - 14, r.Y + r.Height / 2 - 3, 6, 6);
             }
             if (hoverClose) using (var b = new SolidBrush(Color.FromArgb(232, 17, 35))) g.FillRectangle(b, closeRect);
@@ -354,6 +368,7 @@ namespace Glint
             var l = Logical(e.Location);
             for (int i = 0; i < PageNames.Length; i++) if (ItemRect(i).Contains(l)) h = i;
             bool c = closeRect.Contains(l);
+            Cursor = h >= 0 || c ? Cursors.Hand : Cursors.Default;
             if (h != hoverItem || c != hoverClose) { hoverItem = h; hoverClose = c; Invalidate(); }
         }
 
