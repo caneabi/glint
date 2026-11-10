@@ -64,7 +64,11 @@ namespace Glint
             {
                 case "undo": Undo(); break;
                 case "redo": Redo(); break;
-                case "backdrop": BackdropMenu(b); return;
+                case "backdrop": backdropOpen = !backdropOpen; Invalidate(); return;
+                case "mode": ToggleEffect(); return;
+                case "strength":
+                    if (sel != null && (sel.Kind == Kind.Blur || sel.Kind == Kind.Pixelate)) doc.Push();
+                    sliding = true; SetStrength(PointToClient(Cursor.Position).X); return;
                 case "font": FontMenu(Below(b.R)); return;
                 case "shape": ShapeMenu(Below(b.R)); return;
                 case "zoom": ZoomMenu(Below(b.R)); return;
@@ -84,6 +88,7 @@ namespace Glint
                 case "fill": fill = !fill; Apply(o => o.Fill = fill); break;
                 case "hand": hand = !hand; Apply(o => o.Hand = hand); break;
                 default:
+                    if (b.Id.StartsWith("bd")) { PickBackdrop(b.Id); return; }
                     if (b.Id[0] == 'c') SetColor(Palette[int.Parse(b.Id.Substring(1))]);
                     break;
             }
@@ -92,24 +97,26 @@ namespace Glint
 
         Point Below(Rectangle r) { return PointToScreen(new Point(r.X, r.Bottom + 4)); }
 
-        void BackdropMenu(Btn b)
+        void PickBackdrop(string id)
         {
-            var items = new List<ToolStripItem> { MenuKit.Check(L.T("Aus"), backdrop < 0, () => { backdrop = -1; Recompose(); }) };
-            for (int i = 0; i < Renderer.Gradients.Length; i++)
-            {
-                int k = i;
-                var it = MenuKit.Check(L.T("Verlauf") + " " + (i + 1), backdrop == i && !backdropColor.HasValue, () => { backdrop = k; backdropColor = null; Recompose(); });
-                it.Image = MenuKit.Swatch(Renderer.Gradients[i][0], Renderer.Gradients[i][1]);
-                items.Add(it);
-            }
-            var own = MenuKit.Check(L.T("Eigene Farbe…"), backdropColor.HasValue, () =>
+            if (id == "bdoff") backdrop = -1;
+            else if (id == "bdc")
             {
                 using (var d = new ColorPicker(backdropColor ?? Color.FromArgb(64, 68, 72)))
-                    if (d.ShowDialog(this) == DialogResult.OK) { backdropColor = d.Value; backdrop = 0; Recompose(); }
-            });
-            if (backdropColor.HasValue) own.Image = MenuKit.Swatch(backdropColor.Value, Renderer.Custom(backdropColor.Value)[1]);
-            items.Add(new ToolStripSeparator()); items.Add(own);
-            MenuKit.Popup(Below(b.R), items.ToArray());
+                    if (d.ShowDialog(this) == DialogResult.OK) { backdropColor = d.Value; backdrop = 0; }
+            }
+            else { backdrop = int.Parse(id.Substring(2)); backdropColor = null; }
+            backdropOpen = false;
+            Recompose();
+        }
+
+        // Blur and pixelate are one tool with two looks.
+        void ToggleEffect()
+        {
+            bool pixel = AttrKind == Kind.Pixelate;
+            if (sel != null && (sel.Kind == Kind.Blur || sel.Kind == Kind.Pixelate)) { doc.Push(); sel.Kind = pixel ? Kind.Blur : Kind.Pixelate; Recompose(); }
+            else SetTool(pixel ? Tool.Blur : Tool.Pixelate);
+            Invalidate();
         }
 
         static readonly string[] FontChoices = { "Segoe UI", "Arial", "Georgia", "Consolas", "Impact", "Comic Sans MS", "Segoe Print" };
