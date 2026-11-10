@@ -35,11 +35,11 @@ namespace Glint
 
         public override void PaintTo(Graphics g)
         {
-            DrawPanel(g, panel, 20);
+            DrawPanel(g, panel, Ui.CardRadius);
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
             for (int i = 0; i < rects.Length; i++)
                 if (i == hover)
-                    using (var path = Renderer.Round(rects[i], 12))
+                    using (var path = Renderer.Round(rects[i], Ui.ControlRadius))
                     using (var b = new SolidBrush(i == 4 ? Color.FromArgb(232, 17, 35) : Color.FromArgb(24, 255, 255, 255))) g.FillPath(b, path);
             float cy = S + 27.5f;
             Icons.DrawLucide(g, "grip-vertical", S + 20.5f, cy, 19, 1.7f, Grip);

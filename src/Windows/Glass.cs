@@ -13,6 +13,8 @@ namespace Glint
     {
         protected const int S = 16; // shadow margin
         public static bool TestVisible; // test hook
+        protected byte Alpha = 255; // whole window, for fade animations
+        static bool Blur { get { return Settings.Current.GlassBlur; } }
         Bitmap backdrop;
         bool needBackdrop = true;
         int[] rawPixels; long lastHash;
@@ -40,9 +42,10 @@ namespace Glint
             g.Restore(before);
             using (var p = Renderer.Round(r, diameter))
             {
-                if (backdrop != null)
+                if (!Blur) { using (var b = new SolidBrush(Color.FromArgb(255, 34, 34, 37))) g.FillPath(b, p); }
+                else if (backdrop != null)
                     using (var tb = new TextureBrush(backdrop, WrapMode.Clamp)) { tb.TranslateTransform(r.X, r.Y); g.FillPath(tb, p); }
-                using (var b = new SolidBrush(Color.FromArgb(158, 28, 28, 28))) g.FillPath(b, p);
+                if (Blur) using (var b = new SolidBrush(Color.FromArgb(158, 28, 28, 28))) g.FillPath(b, p);
             }
             var line = r; line.Inflate(-.5f, -.5f);
             using (var p = Renderer.Round(line, diameter - 1)) using (var pen = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(pen, p);
@@ -90,7 +93,7 @@ namespace Glint
 
         public void BlurTick()
         {
-            if (!IsHandleCreated || !Visible || TestVisible) return;
+            if (!IsHandleCreated || !Visible || TestVisible || !Blur) return;
             if (GrabBackdrop()) Present();
         }
         public Color BackdropCenter { get { return backdrop == null ? Color.Empty : backdrop.GetPixel(backdrop.Width / 2, backdrop.Height / 2); } }
@@ -98,19 +101,29 @@ namespace Glint
         void Present()
         {
             if (!IsHandleCreated || Width <= 0) return;
-            if (needBackdrop) GrabBackdrop();
+            if (needBackdrop && Blur) GrabBackdrop();
             using (var bmp = new Bitmap(Width, Height, PixelFormat.Format32bppArgb))
             {
                 using (var g = Graphics.FromImage(bmp)) { g.PixelOffsetMode = PixelOffsetMode.Half; PaintTo(g); }
                 IntPtr hb = bmp.GetHbitmap(Color.FromArgb(0)), dc = Native.CreateCompatibleDC(IntPtr.Zero), old = Native.SelectObject(dc, hb);
                 var pos = Location; var size = Size; var src = Point.Empty;
-                var blend = new Native.BLENDFUNCTION { Alpha = 255, Format = 1 };
+                var blend = new Native.BLENDFUNCTION { Alpha = Alpha, Format = 1 };
                 Native.UpdateLayeredWindow(Handle, IntPtr.Zero, ref pos, ref size, dc, ref src, 0, ref blend, 2);
                 Native.SelectObject(dc, old); Native.DeleteObject(hb); Native.DeleteDC(dc);
             }
         }
 
         public void RefreshBackdrop() { needBackdrop = true; Present(); }
+
+        // After the blur setting changed.
+        public static void ApplyBlurSetting()
+        {
+            foreach (var w in Live.ToArray())
+            {
+                if (Blur && w.Visible) w.blurTimer.Start(); else w.blurTimer.Stop();
+                w.RefreshBackdrop();
+            }
+        }
 
         static readonly List<Glass> Live = new List<Glass>();
 
@@ -133,7 +146,7 @@ namespace Glint
         protected override void OnVisibleChanged(EventArgs e)
         {
             base.OnVisibleChanged(e);
-            if (Visible) { RefreshBackdrop(); blurTimer.Start(); } else blurTimer.Stop();
+            if (Visible) { RefreshBackdrop(); if (Blur) blurTimer.Start(); } else blurTimer.Stop();
         }
         protected override void OnInvalidated(InvalidateEventArgs e) { base.OnInvalidated(e); Present(); }
         protected override void WndProc(ref Message m)

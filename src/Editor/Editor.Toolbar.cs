@@ -217,7 +217,7 @@ namespace Glint
                 if (btn.R.IsEmpty || btn.R.Y >= BarH) continue;
                 bool on = btn.Tool == tool || (btn.Id == "backdrop" && backdrop >= 0) || (btn.Id == "more" && moreOpen);
                 if (on || btn == hover)
-                    using (var path = Renderer.Round(btn.R, 12)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(52, 52, 56))) g.FillPath(br, path);
+                    using (var path = Renderer.Round(btn.R, Ui.ControlRadius)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(52, 52, 56))) g.FillPath(br, path);
                 DrawButton(g, btn);
             }
 
@@ -232,22 +232,22 @@ namespace Glint
 
             if (!morePanel.IsEmpty)
             {
-                using (var path = Renderer.Round(morePanel, 20)) using (var br = new SolidBrush(Color.FromArgb(40, 40, 43))) g.FillPath(br, path);
-                using (var path = Renderer.Round(morePanel, 20)) using (var p = new Pen(Color.FromArgb(70, 70, 75))) g.DrawPath(p, path);
+                using (var path = Renderer.Round(morePanel, Ui.CardRadius)) using (var br = new SolidBrush(Color.FromArgb(40, 40, 43))) g.FillPath(br, path);
+                using (var path = Renderer.Round(morePanel, Ui.CardRadius)) using (var p = new Pen(Color.FromArgb(70, 70, 75))) g.DrawPath(p, path);
                 foreach (var btn in buttons)
                 {
                     if (btn.R.IsEmpty || btn.R.Y < BarH) continue;
                     bool on = btn.Tool == tool || (btn.Id == "backdrop" && backdrop >= 0);
                     if (on || btn == hover)
-                        using (var path = Renderer.Round(btn.R, 12)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(58, 58, 62))) g.FillPath(br, path);
+                        using (var path = Renderer.Round(btn.R, Ui.ControlRadius)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(58, 58, 62))) g.FillPath(br, path);
                     DrawButton(g, btn);
                 }
             }
 
             if (!attrPanel.IsEmpty)
             {
-                using (var path = Renderer.Round(attrPanel, 20)) using (var br = new SolidBrush(Color.FromArgb(240, 36, 36, 38))) g.FillPath(br, path);
-                using (var path = Renderer.Round(attrPanel, 20)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
+                using (var path = Renderer.Round(attrPanel, Ui.CardRadius)) using (var br = new SolidBrush(Color.FromArgb(240, 36, 36, 38))) g.FillPath(br, path);
+                using (var path = Renderer.Round(attrPanel, Ui.CardRadius)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
                 using (var f = new Font("Segoe UI", 9f))
                 using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                     foreach (var btn in attrButtons)
@@ -262,7 +262,7 @@ namespace Glint
                             continue;
                         }
                         bool active = (btn.Id == "fill" && fill) || (btn.Id == "hand" && hand);
-                        using (var path = Renderer.Round(btn.R, 10)) using (var br = new SolidBrush(active ? Hover : btn == hover ? Color.FromArgb(58, 58, 62) : Color.FromArgb(46, 46, 49))) g.FillPath(br, path);
+                        using (var path = Renderer.Round(btn.R, Ui.ControlRadius)) using (var br = new SolidBrush(active ? Hover : btn == hover ? Color.FromArgb(58, 58, 62) : Color.FromArgb(46, 46, 49))) g.FillPath(br, path);
                         string t = btn.Id == "w-" || btn.Id == "o-" ? "−" : btn.Id == "w+" || btn.Id == "o+" ? "+" : btn.Id == "fill" ? L.T("Füllung") : L.T("Skizze");
                         g.DrawString(t, f, Brushes.White, btn.R, sf);
                         if (btn.Id == "w+") g.DrawString(width.ToString("0") + " px", f, Brushes.Silver, btn.R.Right + 4, btn.R.Y + 4);

@@ -331,7 +331,7 @@ namespace Glint
                 var size = g.MeasureString(s, f);
                 float ty = r.Y > 28 ? r.Y - 25 : r.Y + 5, tx = r.X;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var path = Renderer.Round(new RectangleF(tx, ty, size.Width + 8, 20), 10))
+                using (var path = Renderer.Round(new RectangleF(tx, ty, size.Width + 8, 20), 20))
                 using (var b = new SolidBrush(Color.FromArgb(225, 28, 28, 28))) g.FillPath(b, path);
                 g.SmoothingMode = SmoothingMode.None;
                 g.DrawString(s, f, Brushes.White, tx + 4, ty + 3);
@@ -459,7 +459,7 @@ namespace Glint
             var srcR = new Rectangle(cur.X - Cells / 2, cur.Y - Cells / 2, Cells, Cells);
             Color c = Color.Black;
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            using (var panel = Renderer.Round(r, 20))
+            using (var panel = Renderer.Round(r, Ui.CardRadius))
             {
                 using (var b = new SolidBrush(Color.FromArgb(240, 28, 28, 28))) g.FillPath(b, panel);
                 var st = g.Save();
@@ -490,7 +490,7 @@ namespace Glint
                 g.Restore(st);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 var line = new RectangleF(r.X + .5f, r.Y + .5f, r.Width - 1, r.Height - 1);
-                using (var lp = Renderer.Round(line, 19)) using (var pen = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(pen, lp);
+                using (var lp = Renderer.Round(line, Ui.CardRadius - 1)) using (var pen = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(pen, lp);
             }
             using (var b = new SolidBrush(c)) g.FillEllipse(b, r.X + 9, dest.Bottom + 9, 12, 12);
             using (var p = new Pen(Color.FromArgb(70, 255, 255, 255))) g.DrawEllipse(p, r.X + 9, dest.Bottom + 9, 12, 12);
@@ -516,7 +516,7 @@ namespace Glint
                     // Lit keycaps show what's switched on.
                     float cw = g.MeasureString(i.Item1, KeyFont).Width + 10;
                     var cap = new RectangleF(x, capY, cw, CapH);
-                    using (var path = Renderer.Round(cap, 8)) using (var b = new SolidBrush(i.Item3 ? Accent : Color.FromArgb(68, 68, 74))) g.FillPath(b, path);
+                    using (var path = Renderer.Round(cap, Ui.SmallRadius)) using (var b = new SolidBrush(i.Item3 ? Accent : Color.FromArgb(68, 68, 74))) g.FillPath(b, path);
                     g.DrawString(i.Item1, KeyFont, i.Item3 ? Brushes.Black : Brushes.White, cap, sf);
                     x += cw + CapGap;
                     float lw = g.MeasureString(i.Item2, HintFont).Width;
@@ -613,7 +613,7 @@ namespace Glint
                 var size = g.MeasureString(s, f);
                 float left = centered ? x - (size.Width + 8) / 2 : x;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
-                using (var path = Renderer.Round(new RectangleF(left, y, size.Width + 8, 20), 10))
+                using (var path = Renderer.Round(new RectangleF(left, y, size.Width + 8, 20), 20))
                 using (var b = new SolidBrush(Color.FromArgb(230, 28, 28, 28))) g.FillPath(b, path);
                 g.SmoothingMode = SmoothingMode.None;
                 g.DrawString(s, f, Brushes.White, left + 4, y + 3);

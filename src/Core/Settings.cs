@@ -46,6 +46,7 @@ namespace Glint
         public string ColorFormat = "hex"; // one of Colors.Formats
         public string ColorAfter = "panel"; // panel | copy
         public string LinkFormat = "url"; // url | markdown
+        public bool GlassBlur = true; // off: glass windows use a plain color
         public int MaxScroll = 20000;
         public List<string> ColorHistory = new List<string>();
         public static Settings Current = new Settings();
@@ -106,6 +107,7 @@ namespace Glint
                     else if (k == "after") Current.After = v;
                     else if (k == "format") Current.Format = v;
                     else if (k == "colorFormat") Current.ColorFormat = v;
+                    else if (k == "glassBlur") Current.GlassBlur = v == "1";
                     else if (k == "linkFormat") Current.LinkFormat = v == "markdown" ? "markdown" : "url";
                     else if (k == "colorAfter") Current.ColorAfter = v == "copy" ? "copy" : "panel";
                     else if (k == "maxScroll") int.TryParse(v, out Current.MaxScroll);
@@ -146,7 +148,7 @@ namespace Glint
             foreach (var p in PanelKeys) sb.AppendLine("panel." + p.Key + "=" + p.Value);
             sb.AppendLine("snap=" + (Snap ? "1" : "0")).AppendLine("freeze=" + (Freeze ? "1" : "0")).AppendLine("crosshair=" + (Crosshair ? "1" : "0"));
             sb.AppendLine("saveDir=" + SaveDir).AppendLine("after=" + After).AppendLine("format=" + Format)
-              .AppendLine("colorFormat=" + ColorFormat).AppendLine("colorAfter=" + ColorAfter).AppendLine("linkFormat=" + LinkFormat).AppendLine("maxScroll=" + MaxScroll).AppendLine("colorHistory=" + string.Join(",", ColorHistory)).AppendLine("jpegQuality=" + JpegQuality).AppendLine("outputScale=" + OutputScale);
+              .AppendLine("colorFormat=" + ColorFormat).AppendLine("colorAfter=" + ColorAfter).AppendLine("linkFormat=" + LinkFormat).AppendLine("glassBlur=" + (GlassBlur ? "1" : "0")).AppendLine("maxScroll=" + MaxScroll).AppendLine("colorHistory=" + string.Join(",", ColorHistory)).AppendLine("jpegQuality=" + JpegQuality).AppendLine("outputScale=" + OutputScale);
             // Written next to the file first, a crash can't leave half a settings file.
             lock (SaveGate)
             {

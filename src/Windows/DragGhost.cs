@@ -85,7 +85,7 @@ namespace Glint
             using (var bmp = new Bitmap(size.Width, size.Height, PixelFormat.Format32bppArgb))
             {
                 using (var g = Graphics.FromImage(bmp))
-                using (var path = Renderer.Round(new RectangleF(0, 0, size.Width, size.Height), Math.Min(size.Width, size.Height) * .16f))
+                using (var path = Renderer.Round(new RectangleF(0, 0, size.Width, size.Height), Math.Min(Math.Min(size.Width, size.Height), Ui.ControlRadius)))
                 {
                     g.SmoothingMode = SmoothingMode.AntiAlias;
                     g.InterpolationMode = InterpolationMode.Bilinear;
