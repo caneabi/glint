@@ -63,10 +63,10 @@ namespace Glint
             }
         }
 
-        public Bitmap Export(int backdrop, int pad)
+        public Bitmap Export(Color[] backdrop, int pad)
         {
             using (var c = Renderer.Compose(Base, Objs))
-                return backdrop >= 0 ? Renderer.Backdrop(c, backdrop, pad) : Imaging.Crop(c, new Rectangle(0, 0, c.Width, c.Height));
+                return backdrop != null ? Renderer.Backdrop(c, backdrop, pad) : Imaging.Crop(c, new Rectangle(0, 0, c.Width, c.Height));
         }
 
         HashSet<Bitmap> InUse()

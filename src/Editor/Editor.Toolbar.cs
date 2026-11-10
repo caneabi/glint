@@ -48,6 +48,27 @@ namespace Glint
             buttons.Add(new Btn { Id = "more", Tip = L.T("Weitere Werkzeuge") });
         }
 
+        // Kind the attribute bar talks about: the selection, or what the current tool makes.
+        Kind? AttrKind { get { return sel != null ? sel.Kind : tool == Tool.Text ? Kind.Text : tool == Tool.Magnifier ? Kind.Magnifier : (Kind?)null; } }
+
+        List<Tuple<string, int, string>> AttrExtras()
+        {
+            var list = new List<Tuple<string, int, string>>();
+            if (AttrKind == Kind.Text) list.Add(Tuple.Create("font", 96, L.T("Schriftart")));
+            if (AttrKind == Kind.Magnifier) { list.Add(Tuple.Create("shape", 74, L.T("Form"))); list.Add(Tuple.Create("zoom", 40, "Zoom")); }
+            return list;
+        }
+
+        static readonly string[] ShapeNames = { "Kreis", "Abgerundet", "Quadrat" };
+
+        string AttrLabel(string id)
+        {
+            if (id == "font") { string f = sel != null && sel.Kind == Kind.Text ? sel.Font : textFont; return f.Length > 13 ? f.Substring(0, 12) + "…" : f; }
+            if (id == "shape") return L.T(ShapeNames[sel != null && sel.Kind == Kind.Magnifier ? sel.Shape : magShape]);
+            if (id == "zoom") return (sel != null && sel.Kind == Kind.Magnifier ? sel.Zoom : magZoom) + "×";
+            return "";
+        }
+
         bool AttrVisible { get { return sel != null || (tool != Tool.Select && tool != Tool.Crop && tool != Tool.Ruler); } }
 
         void Layout2()
@@ -94,7 +115,8 @@ namespace Glint
             attrPanel = Rectangle.Empty;
             if (AttrVisible)
             {
-                int pw = Palette.Length * 24 + 24 + 16 + 26 * 2 + 44 + 8 + 66 * 2 + 16 + 26 * 2 + 44 + 26;
+                var extras = AttrExtras();
+                int pw = Palette.Length * 24 + 24 + 16 + 26 * 2 + 44 + 8 + 66 * 2 + 16 + 26 * 2 + 44 + 26 + extras.Sum(ex => ex.Item2 + 4) + (extras.Count > 0 ? 12 : 0);
                 attrPanel = new Rectangle((cw - pw) / 2, BarH + 8, pw, 40);
                 int ax = attrPanel.X + 13, ay = attrPanel.Y;
                 for (int i = 0; i < Palette.Length; i++) { attrButtons.Add(new Btn { Id = "c" + i, Tip = L.T("Farbe"), R = new Rectangle(ax, ay + 11, 18, 18) }); ax += 24; }
@@ -108,6 +130,8 @@ namespace Glint
                     if (p[0] == "w+" || p[0] == "o+") ax += 44;
                     if (p[0] == "hand") ax += 12;
                 }
+                if (extras.Count > 0) ax += 12;
+                foreach (var ex in extras) { attrButtons.Add(new Btn { Id = ex.Item1, Tip = ex.Item3, R = new Rectangle(ax, ay + 8, ex.Item2, 24) }); ax += ex.Item2 + 4; }
             }
         }
 
@@ -263,7 +287,7 @@ namespace Glint
                         }
                         bool active = (btn.Id == "fill" && fill) || (btn.Id == "hand" && hand);
                         using (var path = Renderer.Round(btn.R, Ui.ControlRadius)) using (var br = new SolidBrush(active ? Hover : btn == hover ? Color.FromArgb(58, 58, 62) : Color.FromArgb(46, 46, 49))) g.FillPath(br, path);
-                        string t = btn.Id == "w-" || btn.Id == "o-" ? "−" : btn.Id == "w+" || btn.Id == "o+" ? "+" : btn.Id == "fill" ? L.T("Füllung") : L.T("Skizze");
+                        string t = btn.Id == "w-" || btn.Id == "o-" ? "−" : btn.Id == "w+" || btn.Id == "o+" ? "+" : btn.Id == "fill" ? L.T("Füllung") : btn.Id == "hand" ? L.T("Skizze") : AttrLabel(btn.Id);
                         g.DrawString(t, f, Brushes.White, btn.R, sf);
                         if (btn.Id == "w+") g.DrawString(width.ToString("0") + " px", f, Brushes.Silver, btn.R.Right + 4, btn.R.Y + 4);
                         if (btn.Id == "o+") g.DrawString(opacity + " %", f, Brushes.Silver, btn.R.Right + 4, btn.R.Y + 4);

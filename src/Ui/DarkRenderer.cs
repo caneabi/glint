@@ -86,6 +86,35 @@ namespace Glint
             return it;
         }
 
+        // Dark context menu that cleans itself up once closed.
+        public static void Popup(Point screen, params ToolStripItem[] items)
+        {
+            var m = new ContextMenuStrip();
+            Style(m, true);
+            foreach (var i in items) if (i != null) m.Items.Add(i);
+            m.Closed += delegate { m.BeginInvoke(new Action(m.Dispose)); };
+            m.Show(screen);
+        }
+
+        public static ToolStripMenuItem Check(string text, bool on, Action click)
+        {
+            var it = Item(text, click);
+            it.Checked = on;
+            return it;
+        }
+
+        public static Bitmap Swatch(Color a, Color b)
+        {
+            var bmp = new Bitmap(16, 16);
+            using (var g = Graphics.FromImage(bmp))
+            using (var br = new System.Drawing.Drawing2D.LinearGradientBrush(new Rectangle(0, 0, 16, 16), a, b, 45f))
+            {
+                g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+                g.FillEllipse(br, 1, 1, 14, 14);
+            }
+            return bmp;
+        }
+
         public static ToolStripMenuItem Sub(string text, bool checks)
         {
             var it = Item(text, null);

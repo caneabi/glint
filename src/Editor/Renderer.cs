@@ -112,9 +112,11 @@ namespace Glint
             }
         }
 
+        public static float TextSize(Obj o) { return o.Size > 0 ? o.Size : 14 + o.Width * 3; }
+
         public static Font TextFont(Obj o)
         {
-            return new Font(o.Hand ? "Segoe Print" : "Segoe UI", 14 + o.Width * 3, FontStyle.Bold, GraphicsUnit.Pixel);
+            return new Font(o.Hand ? "Segoe Print" : o.Font, TextSize(o), FontStyle.Bold, GraphicsUnit.Pixel);
         }
 
         public static Color Contrast(Color c) { return c.R * .299 + c.G * .587 + c.B * .114 > 150 ? Color.Black : Color.White; }
@@ -154,13 +156,17 @@ namespace Glint
         {
             var r = Rectangle.Round(o.Box);
             if (r.Width < 4 || r.Height < 4) return;
-            var srcR = new Rectangle(r.X + r.Width / 4, r.Y + r.Height / 4, r.Width / 2, r.Height / 2);
+            float z = Math.Max(1.25f, o.Zoom);
+            int sw = Math.Max(1, (int)(r.Width / z)), sh = Math.Max(1, (int)(r.Height / z));
+            var srcR = new Rectangle(r.X + (r.Width - sw) / 2, r.Y + (r.Height - sh) / 2, sw, sh);
             srcR.Intersect(new Rectangle(0, 0, canvas.Width, canvas.Height));
             if (srcR.Width < 1 || srcR.Height < 1) return;
             using (var copy = canvas.Clone(srcR, PixelFormat.Format32bppArgb))
             using (var path = new GraphicsPath())
             {
-                path.AddEllipse(r);
+                if (o.Shape == 1) path.AddPath(Round(r, Math.Min(r.Width, r.Height) * .3f), false);
+                else if (o.Shape == 2) path.AddRectangle(r);
+                else path.AddEllipse(r);
                 var st = g.Save();
                 g.SetClip(path);
                 g.InterpolationMode = InterpolationMode.NearestNeighbor; g.PixelOffsetMode = PixelOffsetMode.Half;
@@ -288,14 +294,15 @@ namespace Glint
             p.CloseFigure(); return p;
         }
 
-        public static Bitmap Backdrop(Bitmap img, int preset, int pad)
+        public static Color[] Custom(Color c) { return new[] { c, Color.FromArgb((c.R + 255) / 2, (c.G + 255) / 2, (c.B + 255) / 2) }; }
+
+        public static Bitmap Backdrop(Bitmap img, Color[] cols, int pad)
         {
             var o = new Bitmap(img.Width + pad * 2, img.Height + pad * 2, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(o))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 var all = new Rectangle(0, 0, o.Width, o.Height);
-                var cols = Gradients[preset % Gradients.Length];
                 using (var br = new LinearGradientBrush(all, cols[0], cols[1], 45f)) g.FillRectangle(br, all);
                 var inner = new RectangleF(pad, pad, img.Width, img.Height);
                 for (int i = 14; i > 0; i--)

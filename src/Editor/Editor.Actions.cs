@@ -64,7 +64,10 @@ namespace Glint
             {
                 case "undo": Undo(); break;
                 case "redo": Redo(); break;
-                case "backdrop": backdrop = backdrop + 1 >= Renderer.Gradients.Length ? -1 : backdrop + 1; Recompose(); break;
+                case "backdrop": BackdropMenu(b); return;
+                case "font": FontMenu(Below(b.R)); return;
+                case "shape": ShapeMenu(Below(b.R)); return;
+                case "zoom": ZoomMenu(Below(b.R)); return;
                 case "ocr": RunOcr(); break;
                 case "addcap": AddCapture(); break;
                 case "pin": new PinWindow(Export()).Show(); Close(); break;
@@ -85,6 +88,112 @@ namespace Glint
                     break;
             }
             Invalidate();
+        }
+
+        Point Below(Rectangle r) { return PointToScreen(new Point(r.X, r.Bottom + 4)); }
+
+        void BackdropMenu(Btn b)
+        {
+            var items = new List<ToolStripItem> { MenuKit.Check(L.T("Aus"), backdrop < 0, () => { backdrop = -1; Recompose(); }) };
+            for (int i = 0; i < Renderer.Gradients.Length; i++)
+            {
+                int k = i;
+                var it = MenuKit.Check(L.T("Verlauf") + " " + (i + 1), backdrop == i && !backdropColor.HasValue, () => { backdrop = k; backdropColor = null; Recompose(); });
+                it.Image = MenuKit.Swatch(Renderer.Gradients[i][0], Renderer.Gradients[i][1]);
+                items.Add(it);
+            }
+            var own = MenuKit.Check(L.T("Eigene Farbe…"), backdropColor.HasValue, () =>
+            {
+                using (var d = new ColorPicker(backdropColor ?? Color.FromArgb(64, 68, 72)))
+                    if (d.ShowDialog(this) == DialogResult.OK) { backdropColor = d.Value; backdrop = 0; Recompose(); }
+            });
+            if (backdropColor.HasValue) own.Image = MenuKit.Swatch(backdropColor.Value, Renderer.Custom(backdropColor.Value)[1]);
+            items.Add(new ToolStripSeparator()); items.Add(own);
+            MenuKit.Popup(Below(b.R), items.ToArray());
+        }
+
+        static readonly string[] FontChoices = { "Segoe UI", "Arial", "Georgia", "Consolas", "Impact", "Comic Sans MS", "Segoe Print" };
+
+        ToolStripMenuItem[] FontItems()
+        {
+            var installed = new HashSet<string>(FontFamily.Families.Select(f => f.Name));
+            string current = sel != null && sel.Kind == Kind.Text ? sel.Font : textFont;
+            return FontChoices.Where(installed.Contains).Select(f =>
+            {
+                var it = MenuKit.Check(f, f == current, () => { textFont = f; Apply(o => { if (o.Kind == Kind.Text) o.Font = f; }); });
+                it.Font = new Font(f, 9.5f);
+                return it;
+            }).ToArray();
+        }
+
+        void FontMenu(Point at) { MenuKit.Popup(at, FontItems()); }
+
+        ToolStripMenuItem[] ShapeItems()
+        {
+            int current = sel != null && sel.Kind == Kind.Magnifier ? sel.Shape : magShape;
+            return Enumerable.Range(0, ShapeNames.Length).Select(i => MenuKit.Check(L.T(ShapeNames[i]), i == current, () => { magShape = i; Apply(o => { if (o.Kind == Kind.Magnifier) o.Shape = i; }); })).ToArray();
+        }
+
+        ToolStripMenuItem[] ZoomItems()
+        {
+            int current = sel != null && sel.Kind == Kind.Magnifier ? sel.Zoom : magZoom;
+            return new[] { 2, 3, 4, 6 }.Select(z => MenuKit.Check(z + "×", z == current, () => { magZoom = z; Apply(o => { if (o.Kind == Kind.Magnifier) o.Zoom = z; }); })).ToArray();
+        }
+
+        void ShapeMenu(Point at) { MenuKit.Popup(at, ShapeItems()); }
+        void ZoomMenu(Point at) { MenuKit.Popup(at, ZoomItems()); }
+
+        ToolStripMenuItem SubMenu(string text, ToolStripMenuItem[] items)
+        {
+            var sub = MenuKit.Sub(text, true);
+            sub.DropDownItems.AddRange(items);
+            return sub;
+        }
+
+        // Right click on the canvas: object actions, or the image actions on empty space.
+        void CanvasMenu(Point at)
+        {
+            var screen = PointToScreen(at);
+            var o = HitObject(ToImage(at));
+            if (o == null)
+            {
+                MenuKit.Popup(screen,
+                    MenuKit.Item(L.T("Kopieren"), CopyImage, "copy"), MenuKit.Item(L.T("Speichern"), Save, "save"), MenuKit.Item(L.T("Speichern unter…"), SaveAs),
+                    new ToolStripSeparator(),
+                    MenuKit.Item(L.T("Anpinnen"), () => { new PinWindow(Export()).Show(); Close(); }, "pin"),
+                    MenuKit.Item(L.T("Hochladen"), () => RunUpload(Uploader.Active), "cloud-upload"),
+                    MenuKit.Item(L.T("Text erkennen"), RunOcr, "scan-text"),
+                    Clipboard.ContainsImage() ? MenuKit.Item(L.T("Einfügen"), () => { using (var i = Clipboard.GetImage()) AddImage(Imaging.Normalize(i)); }, "clipboard") : null);
+                return;
+            }
+            sel = o; tool = Tool.Select; Invalidate();
+            var items = new List<ToolStripItem>();
+            if (o.Kind == Kind.Text) { items.Add(MenuKit.Item(L.T("Bearbeiten"), () => StartText(o.A, o), "pencil")); items.Add(SubMenu(L.T("Schriftart"), FontItems())); }
+            if (o.Kind == Kind.Magnifier) { items.Add(SubMenu(L.T("Form"), ShapeItems())); items.Add(SubMenu("Zoom", ZoomItems())); }
+            var colors = MenuKit.Sub(L.T("Farbe"), true);
+            foreach (var c in Palette) { var col = c; var it = MenuKit.Check(Colors.Hex(col), o.Color.ToArgb() == col.ToArgb(), () => SetColor(col)); it.Image = MenuKit.Swatch(col, col); colors.DropDownItems.Add(it); }
+            colors.DropDownItems.Add(new ToolStripSeparator());
+            colors.DropDownItems.Add(MenuKit.Item(L.T("Eigene Farbe…"), () => { using (var d = new ColorPicker(o.Color)) if (d.ShowDialog(this) == DialogResult.OK) SetColor(d.Value); }));
+            items.Add(colors);
+            items.Add(new ToolStripSeparator());
+            items.Add(MenuKit.Item(L.T("Duplizieren"), () => { doc.Push(); var c = o.Clone(); c.Move(16, 16); Objs.Add(c); sel = c; Recompose(); }, "copy"));
+            items.Add(MenuKit.Item(L.T("Nach vorne"), () => { doc.Push(); Objs.Remove(o); Objs.Add(o); Recompose(); }));
+            items.Add(MenuKit.Item(L.T("Nach hinten"), () => { doc.Push(); Objs.Remove(o); Objs.Insert(0, o); Recompose(); }));
+            items.Add(new ToolStripSeparator());
+            items.Add(MenuKit.Item(L.T("Löschen"), () => { doc.Push(); Objs.Remove(o); sel = null; Recompose(); }, "trash-2"));
+            MenuKit.Popup(screen, items.ToArray());
+        }
+
+        // Corner handles scale the text, the opposite corner stays put.
+        void ScaleText(PointF p)
+        {
+            var r = sel.Box;
+            bool left = handle == 0 || handle == 3, top = handle <= 1;
+            var anchor = new PointF(left ? r.Right : r.Left, top ? r.Bottom : r.Top);
+            float oldSize = Renderer.TextSize(sel), h = Math.Max(6, Math.Abs(p.Y - anchor.Y));
+            float size = Math.Max(6, Math.Min(400, oldSize * h / Math.Max(1, r.Height))), k = size / oldSize;
+            sel.Size = size;
+            sel.A = new PointF(left ? anchor.X - r.Width * k : anchor.X, top ? anchor.Y - r.Height * k : anchor.Y);
         }
 
         void SetColor(Color c) { color = c; Apply(o => o.Color = c); }

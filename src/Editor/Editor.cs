@@ -21,7 +21,11 @@ namespace Glint
         Tool tool = Tool.Select;
         Obj sel, draft;
         Color color = Palette[0]; float width = 4; bool fill, hand; int opacity = 100;
-        int backdrop = -1; const int Pad = 64;
+        int backdrop = -1; const int Pad = 64; // preset index, -1 off
+        Color? backdropColor; // own color instead of a preset
+        Color[] BackdropColors { get { return backdrop < 0 ? null : backdropColor.HasValue ? Renderer.Custom(backdropColor.Value) : Renderer.Gradients[backdrop % Renderer.Gradients.Length]; } }
+        string textFont = "Segoe UI";
+        int magShape, magZoom = 2;
         float zoom = 1; bool fit = true; PointF pan = PointF.Empty;
         readonly List<Btn> buttons = new List<Btn>(), attrButtons = new List<Btn>();
         Btn hover;
@@ -141,7 +145,7 @@ namespace Glint
             if (composed == null) composed = new Bitmap(doc.Base.Width, doc.Base.Height, PixelFormat.Format32bppPArgb);
             Renderer.Compose(doc.Base, Objs, composed);
             if (display != null && display != composed) display.Dispose();
-            display = backdrop >= 0 ? Renderer.Backdrop(composed, backdrop, Pad) : composed;
+            display = backdrop >= 0 ? Renderer.Backdrop(composed, BackdropColors, Pad) : composed;
             cacheStale = true;
         }
 
@@ -185,7 +189,7 @@ namespace Glint
 
         Bitmap IImageSource.CurrentImage() { return Export(); }
 
-        public Bitmap Export() { return doc.Export(backdrop, Pad); }
+        public Bitmap Export() { return doc.Export(BackdropColors, Pad); }
 
         void UpdateFit()
         {
@@ -288,7 +292,7 @@ namespace Glint
                 var c = o.Ctrl ?? new PointF((o.A.X + o.B.X) / 2, (o.A.Y + o.B.Y) / 2);
                 return new List<PointF> { o.A, o.B, c };
             }
-            if (o.Kind == Kind.Pen || o.Kind == Kind.Highlight || o.Kind == Kind.Text || o.Kind == Kind.Step) return new List<PointF>();
+            if (o.Kind == Kind.Pen || o.Kind == Kind.Highlight || o.Kind == Kind.Step) return new List<PointF>();
             var r = o.Box;
             return new List<PointF> { new PointF(r.Left, r.Top), new PointF(r.Right, r.Top), new PointF(r.Right, r.Bottom), new PointF(r.Left, r.Bottom) };
         }
@@ -402,6 +406,7 @@ namespace Glint
             if (attrPanel.Contains(e.Location)) return;
             if (!CanvasArea.Contains(e.Location)) return;
             if (e.Button == MouseButtons.Middle) { panning = true; panStart = e.Location; fit = false; return; }
+            if (e.Button == MouseButtons.Right) { CanvasMenu(e.Location); return; }
             if (e.Button != MouseButtons.Left) return;
             var p = ToImage(e.Location);
             last = downAt = p; dragging = true;
@@ -427,7 +432,7 @@ namespace Glint
 
         Obj NewObj(Kind k, PointF p)
         {
-            return new Obj { Kind = k, A = p, B = p, Color = color, Width = width, Fill = fill, Hand = hand, Opacity = opacity, Seed = Environment.TickCount & 0xFFFF };
+            return new Obj { Kind = k, A = p, B = p, Color = color, Width = width, Fill = fill, Hand = hand, Opacity = opacity, Seed = Environment.TickCount & 0xFFFF, Font = textFont, Zoom = magZoom, Shape = magShape };
         }
 
         void BeginSelect(PointF p)
@@ -490,7 +495,8 @@ namespace Glint
 
         void DragSelected(PointF p)
         {
-            if (handle >= 0)
+            if (handle >= 0 && sel.Kind == Kind.Text) ScaleText(p);
+            else if (handle >= 0)
             {
                 if (sel.IsLine)
                 {
@@ -716,7 +722,7 @@ namespace Glint
             OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, b.X, b.Y, 0));
             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, b.X, b.Y, 0));
         }
-        public void SetBackdrop(int i) { backdrop = i; Recompose(); }
+        public void SetBackdrop(int i) { backdrop = i; backdropColor = null; Recompose(); }
         public void SetFitSize(Size s) { ClientSize = s; }
     }
 }

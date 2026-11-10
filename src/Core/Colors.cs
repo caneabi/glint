@@ -45,6 +45,41 @@ namespace Glint
             }
             return Hex(c);
         }
+        // Main colors of an image: coarse buckets by count, near duplicates merged.
+        public static List<Color> Palette(Bitmap b, int max = 6)
+        {
+            var counts = new Dictionary<int, int>();
+            var sums = new Dictionary<int, long[]>();
+            int step = Math.Max(1, (int)Math.Sqrt((double)b.Width * b.Height / 12000));
+            var d = b.LockBits(new Rectangle(0, 0, b.Width, b.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            try
+            {
+                var row = new int[b.Width];
+                for (int y = 0; y < b.Height; y += step)
+                {
+                    Marshal.Copy(d.Scan0 + y * d.Stride, row, 0, b.Width);
+                    for (int x = 0; x < b.Width; x += step)
+                    {
+                        int v = row[x], r = (v >> 16) & 255, g = (v >> 8) & 255, bl = v & 255;
+                        int key = (r >> 4) << 8 | (g >> 4) << 4 | (bl >> 4);
+                        int n; counts.TryGetValue(key, out n); counts[key] = n + 1;
+                        long[] s; if (!sums.TryGetValue(key, out s)) sums[key] = s = new long[3];
+                        s[0] += r; s[1] += g; s[2] += bl;
+                    }
+                }
+            }
+            finally { b.UnlockBits(d); }
+            var result = new List<Color>();
+            foreach (var kv in counts.OrderByDescending(k => k.Value))
+            {
+                var s = sums[kv.Key];
+                var c = Color.FromArgb((int)(s[0] / kv.Value), (int)(s[1] / kv.Value), (int)(s[2] / kv.Value));
+                if (result.All(o => Imaging.ColorDiff(o, c) > 60)) result.Add(c);
+                if (result.Count >= max) break;
+            }
+            return result;
+        }
+
         public static double Wcag(Color a, Color b)
         {
             Func<Color, double> lum = c => .2126 * Lin(c.R) + .7152 * Lin(c.G) + .0722 * Lin(c.B);

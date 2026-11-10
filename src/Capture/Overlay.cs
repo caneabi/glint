@@ -160,7 +160,7 @@ namespace Glint
             if (picker)
             {
                 var pick = new List<Tuple<string, string, bool>> {
-                    Tuple.Create("Esc", L.T("Abbrechen"), false), Tuple.Create(L.T("Klick"), L.T("Aufnehmen"), false), Tuple.Create(L.T("Pfeile"), L.T("Feinjustieren"), false) };
+                    Tuple.Create("Esc", L.T("Abbrechen"), false), Tuple.Create(L.T("Klick"), L.T("Aufnehmen"), false), Tuple.Create(L.T("Ziehen"), "Palette", false), Tuple.Create(L.T("Pfeile"), L.T("Feinjustieren"), false) };
                 if (!pickOnly) pick.Add(Tuple.Create("Tab", L.T("Zurück"), true));
                 return pick;
             }
@@ -453,7 +453,7 @@ namespace Glint
         void DrawLoupe(Graphics g)
         {
             if (measure) { if (!dragging) DrawMeasure(g); return; }
-            if (picker) { DrawPickLoupe(g); return; }
+            if (picker) { if (!dragging) DrawPickLoupe(g); return; }
             var r = LoupeRect();
             var dest = new Rectangle(r.X, r.Y, Loupe, Loupe);
             var srcR = new Rectangle(cur.X - Cells / 2, cur.Y - Cells / 2, Cells, Cells);
@@ -529,7 +529,8 @@ namespace Glint
         {
             if (picker)
             {
-                if (e.Button == MouseButtons.Left) Pick(Sample((ModifierKeys & Keys.Shift) != 0)); else Close();
+                if (e.Button != MouseButtons.Left) { Close(); return; }
+                start = cur = e.Location; dragging = true; Update2(); // a drag becomes a palette
                 return;
             }
             if (e.Button == MouseButtons.Right)
@@ -633,6 +634,17 @@ namespace Glint
         protected override void OnMouseUp(MouseEventArgs e)
         {
             if (!dragging || e.Button != MouseButtons.Left) return;
+            if (picker)
+            {
+                cur = e.Location; var area = Selection(); dragging = false;
+                if (area.Width < 6 || area.Height < 6) { Pick(Sample((ModifierKeys & Keys.Shift) != 0)); return; }
+                List<Color> colors;
+                using (var b = frozen ? Imaging.Crop(shot, area) : Imaging.Grab(new Rectangle(area.X + virt.X, area.Y + virt.Y, area.Width, area.Height), false))
+                    colors = Colors.Palette(b);
+                Close();
+                if (colors.Count > 0) ColorPanel.OpenPalette(colors);
+                return;
+            }
             if (measure)
             {
                 cur = e.Location; var area = Selection(); dragging = false;
