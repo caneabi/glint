@@ -160,6 +160,9 @@ namespace Glint
             var scale = new Segmented(new[] { "100", "75", "50", "25" }, new[] { "100 %", "75 %", "50 %", "25 %" }, s.OutputScale.ToString(), 230);
             scale.Changed = () => s.OutputScale = int.Parse(scale.Value);
             p.AddRow(L.T("Ausgabegröße"), scale);
+            var link = new Segmented(new[] { "url", "markdown" }, new[] { "URL", "Markdown" }, s.LinkFormat, 230);
+            link.Changed = () => s.LinkFormat = link.Value;
+            p.AddRow(L.T("Link nach Upload"), link);
             p.AddBlock(L.T("Dateiname beim Speichern"), new FileNameEditor(s.FileNameSave, false, ".png", v => s.FileNameSave = v), 104);
             p.AddBlock(L.T("Dateiname beim Hochladen"), new FileNameEditor(s.FileNameUpload, true, ".png", v => s.FileNameUpload = v), 104);
             p.AddBlock(L.T("Variablen"), new FileNameVars(), 124);

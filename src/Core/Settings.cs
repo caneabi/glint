@@ -20,10 +20,10 @@ namespace Glint
         static string FilePath { get { return FileOverride ?? Path.Combine(Dir, "settings.ini"); } }
         public static readonly Dictionary<string, string> Labels = new Dictionary<string, string> {
             {"Fullscreen","Vollbild"},{"Area","Bereich"},{"Window","Fenster wählen"},{"ActiveWindow","Aktives Fenster"},
-            {"Ocr","Text erkennen (OCR)"},{"Scrolling","Scrolling-Aufnahme"},{"Repeat","Bereich wiederholen"},{"Delayed","Vollbild in 3 s"},{"Upload","Bereich hochladen"},{"Color","Farbe aufnehmen"}};
+            {"Ocr","Text erkennen (OCR)"},{"Scrolling","Scrolling-Aufnahme"},{"Repeat","Bereich wiederholen"},{"Delayed","Vollbild in 3 s"},{"Upload","Bereich hochladen"},{"Color","Farbe aufnehmen"},{"Measure","Bildschirm messen"}};
         public Dictionary<string, string> Hotkeys = new Dictionary<string, string> {
             {"Fullscreen","Ctrl+Shift+D1"},{"Area","PrintScreen"},{"Window","Ctrl+Shift+D3"},{"ActiveWindow","Ctrl+Shift+D4"},
-            {"Ocr","Ctrl+Shift+D5"},{"Scrolling","Ctrl+Shift+D6"},{"Repeat","Ctrl+Shift+D7"},{"Delayed","Ctrl+Shift+D8"},{"Upload",""},{"Color","Ctrl+Shift+D9"}};
+            {"Ocr","Ctrl+Shift+D5"},{"Scrolling","Ctrl+Shift+D6"},{"Repeat","Ctrl+Shift+D7"},{"Delayed","Ctrl+Shift+D8"},{"Upload",""},{"Color","Ctrl+Shift+D9"},{"Measure","Ctrl+Shift+D0"}};
         public string SaveDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyPictures), "Glint");
         public string After = "thumbnail"; // editor | copy | thumbnail
         public bool Snap = true, Freeze = true, Crosshair = false;
@@ -45,6 +45,7 @@ namespace Glint
         public string Format = "auto"; // auto | png | jpg | webp
         public string ColorFormat = "hex"; // one of Colors.Formats
         public string ColorAfter = "panel"; // panel | copy
+        public string LinkFormat = "url"; // url | markdown
         public int MaxScroll = 20000;
         public List<string> ColorHistory = new List<string>();
         public static Settings Current = new Settings();
@@ -105,6 +106,7 @@ namespace Glint
                     else if (k == "after") Current.After = v;
                     else if (k == "format") Current.Format = v;
                     else if (k == "colorFormat") Current.ColorFormat = v;
+                    else if (k == "linkFormat") Current.LinkFormat = v == "markdown" ? "markdown" : "url";
                     else if (k == "colorAfter") Current.ColorAfter = v == "copy" ? "copy" : "panel";
                     else if (k == "maxScroll") int.TryParse(v, out Current.MaxScroll);
                     else if (k == "colorHistory") Current.ColorHistory = v.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries).ToList();
@@ -144,7 +146,7 @@ namespace Glint
             foreach (var p in PanelKeys) sb.AppendLine("panel." + p.Key + "=" + p.Value);
             sb.AppendLine("snap=" + (Snap ? "1" : "0")).AppendLine("freeze=" + (Freeze ? "1" : "0")).AppendLine("crosshair=" + (Crosshair ? "1" : "0"));
             sb.AppendLine("saveDir=" + SaveDir).AppendLine("after=" + After).AppendLine("format=" + Format)
-              .AppendLine("colorFormat=" + ColorFormat).AppendLine("colorAfter=" + ColorAfter).AppendLine("maxScroll=" + MaxScroll).AppendLine("colorHistory=" + string.Join(",", ColorHistory)).AppendLine("jpegQuality=" + JpegQuality).AppendLine("outputScale=" + OutputScale);
+              .AppendLine("colorFormat=" + ColorFormat).AppendLine("colorAfter=" + ColorAfter).AppendLine("linkFormat=" + LinkFormat).AppendLine("maxScroll=" + MaxScroll).AppendLine("colorHistory=" + string.Join(",", ColorHistory)).AppendLine("jpegQuality=" + JpegQuality).AppendLine("outputScale=" + OutputScale);
             // Written next to the file first, a crash can't leave half a settings file.
             lock (SaveGate)
             {

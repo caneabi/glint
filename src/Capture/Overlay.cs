@@ -34,17 +34,28 @@ namespace Glint
 
         public static bool Active;
 
-        public Overlay(bool windowMode, bool pickColor = false)
+        readonly bool measure; // ruler mode: distances to the next edge, drag measures an area
+        int[] pixels; // measure mode: the frozen shot as plain ints, GetPixel is too slow for edge search
+
+        public Overlay(bool windowMode, bool pickColor = false, bool measureMode = false)
         {
             var s = Settings.Current;
-            frozen = s.Freeze;
+            measure = measureMode;
+            frozen = s.Freeze || measure;
             picker = pickOnly = pickColor;
-            snap = !picker && (windowMode || s.Snap);
+            snap = !picker && !measure && (windowMode || s.Snap);
             virt = SystemInformation.VirtualScreen;
             windows = Native.VisibleWindows();
             if (frozen)
             {
                 shot = Imaging.Grab(virt);
+                if (measure)
+                {
+                    var d = shot.LockBits(new Rectangle(0, 0, shot.Width, shot.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+                    pixels = new int[shot.Width * shot.Height];
+                    Marshal.Copy(d.Scan0, pixels, 0, pixels.Length);
+                    shot.UnlockBits(d);
+                }
                 dim = new Bitmap(shot.Width, shot.Height, PixelFormat.Format32bppPArgb);
                 using (var g = Graphics.FromImage(dim))
                 {
@@ -146,6 +157,8 @@ namespace Glint
         // Key, label, whether it's switched on.
         List<Tuple<string, string, bool>> HintItems()
         {
+            if (measure) return new List<Tuple<string, string, bool>> {
+                Tuple.Create("Esc", L.T("Schließen"), false), Tuple.Create(L.T("Klick"), L.T("Kopieren"), false), Tuple.Create(L.T("Ziehen"), L.T("Fläche messen"), false) };
             if (picker)
             {
                 var pick = new List<Tuple<string, string, bool>> {
@@ -209,6 +222,7 @@ namespace Glint
             else
             {
                 parts.Add(lastLoupe); parts.Add(loupe);
+                if (measure) { parts.AddRange(lastMeasure); parts.AddRange(MeasureParts()); }
                 if (hint != lastHint) { parts.Add(lastHint); parts.Add(hint); }
                 if (r != lastHighlight)
                 {
@@ -229,6 +243,7 @@ namespace Glint
                 }
             }
             lastLoupe = loupe; lastHint = hint; lastHighlight = r; lastCur = cur;
+            if (measure) lastMeasure = MeasureParts();
             foreach (var part in Merge(parts)) Render(part);
         }
 
@@ -283,7 +298,7 @@ namespace Glint
         {
             var r = Highlight();
             g.CompositingMode = CompositingMode.SourceCopy;
-            if (frozen) g.DrawImage(picker ? shot : dim, clip, clip, GraphicsUnit.Pixel);
+            if (frozen) g.DrawImage(picker || measure ? shot : dim, clip, clip, GraphicsUnit.Pixel);
             else using (var b = new SolidBrush(Color.FromArgb(picker ? 1 : 120, 0, 0, 0))) g.FillRectangle(b, clip);
             bool any = r.Width > 0 && r.Height > 0;
             if (any)
@@ -414,6 +429,7 @@ namespace Glint
 
         void DrawLoupe(Graphics g)
         {
+            if (measure) { if (!dragging) DrawMeasure(g); return; }
             if (picker) { DrawPickLoupe(g); return; }
             var r = LoupeRect();
             var dest = new Rectangle(r.X, r.Y, Loupe, Loupe);
@@ -457,6 +473,11 @@ namespace Glint
             using (var p = new Pen(Color.FromArgb(70, 255, 255, 255))) g.DrawEllipse(p, r.X + 9, dest.Bottom + 9, 12, 12);
             g.SmoothingMode = SmoothingMode.None;
             using (var f = new Font("Segoe UI", 9f)) g.DrawString(Colors.Hex(c), f, Brushes.White, r.X + 26, dest.Bottom + 6);
+            // Screen coordinates, handy for bug reports and CSS.
+            using (var f = new Font("Segoe UI", 7.5f))
+            using (var b = new SolidBrush(Color.FromArgb(150, 150, 156)))
+            using (var sf = new StringFormat { Alignment = StringAlignment.Far })
+                g.DrawString((cur.X + virt.X) + ", " + (cur.Y + virt.Y), f, b, new RectangleF(r.X, dest.Bottom + 8, r.Width - 8, 16), sf);
         }
 
         void DrawHint(Graphics g)
@@ -506,9 +527,81 @@ namespace Glint
             cur = e.Location; Update2();
         }
 
+        // Edge search: walks from the point until the color changes noticeably.
+        int[] Span(Point p, bool horizontal)
+        {
+            int w = shot.Width, h = shot.Height;
+            if (p.X < 0 || p.Y < 0 || p.X >= w || p.Y >= h) return new[] { 0, 0 };
+            int start = pixels[p.Y * w + p.X], lo = horizontal ? p.X : p.Y, hi = lo, max = (horizontal ? w : h) - 1;
+            Func<int, int> at = i => horizontal ? pixels[p.Y * w + i] : pixels[i * w + p.X];
+            Func<int, bool> same = v => Math.Abs(((v >> 16) & 255) - ((start >> 16) & 255)) + Math.Abs(((v >> 8) & 255) - ((start >> 8) & 255)) + Math.Abs((v & 255) - (start & 255)) < 30;
+            while (lo > 0 && same(at(lo - 1))) lo--;
+            while (hi < max && same(at(hi + 1))) hi++;
+            return new[] { lo, hi + 1 };
+        }
+
+        List<Rectangle> lastMeasure = new List<Rectangle>();
+
+        List<Rectangle> MeasureParts()
+        {
+            var list = new List<Rectangle>();
+            if (dragging || pixels == null) return list;
+            var hs = Span(cur, true); var vs = Span(cur, false);
+            list.Add(Rectangle.FromLTRB(hs[0] - 8, cur.Y - 8, hs[1] + 8, cur.Y + 36));
+            list.Add(Rectangle.FromLTRB(cur.X - 8, vs[0] - 8, cur.X + 80, vs[1] + 8));
+            return list;
+        }
+
+        void DrawMeasure(Graphics g)
+        {
+            if (pixels == null) return;
+            var hs = Span(cur, true); var vs = Span(cur, false);
+            g.SmoothingMode = SmoothingMode.None;
+            using (var p = new Pen(Accent))
+            {
+                g.DrawLine(p, hs[0], cur.Y, hs[1] - 1, cur.Y);
+                g.DrawLine(p, hs[0], cur.Y - 5, hs[0], cur.Y + 5); g.DrawLine(p, hs[1] - 1, cur.Y - 5, hs[1] - 1, cur.Y + 5);
+                g.DrawLine(p, cur.X, vs[0], cur.X, vs[1] - 1);
+                g.DrawLine(p, cur.X - 5, vs[0], cur.X + 5, vs[0]); g.DrawLine(p, cur.X - 5, vs[1] - 1, cur.X + 5, vs[1] - 1);
+            }
+            MeasureChip(g, (hs[1] - hs[0]) + " px", (hs[0] + hs[1]) / 2f, cur.Y + 8, true);
+            MeasureChip(g, (vs[1] - vs[0]) + " px", cur.X + 8, (vs[0] + vs[1]) / 2f - 10, false);
+        }
+
+        static void MeasureChip(Graphics g, string s, float x, float y, bool centered)
+        {
+            using (var f = new Font("Segoe UI", 8.5f))
+            {
+                var size = g.MeasureString(s, f);
+                float left = centered ? x - (size.Width + 8) / 2 : x;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var path = Renderer.Round(new RectangleF(left, y, size.Width + 8, 20), 10))
+                using (var b = new SolidBrush(Color.FromArgb(230, 28, 28, 28))) g.FillPath(b, path);
+                g.SmoothingMode = SmoothingMode.None;
+                g.DrawString(s, f, Brushes.White, left + 4, y + 3);
+            }
+        }
+
+        // Measure mode stays open, a click or a dragged area copies the size.
+        void CopyMeasure(Rectangle area)
+        {
+            string text;
+            if (area.Width >= 4 && area.Height >= 4) text = area.Width + " × " + area.Height;
+            else { var hs = Span(cur, true); var vs = Span(cur, false); text = (hs[1] - hs[0]) + " × " + (vs[1] - vs[0]); }
+            Clipboard.SetText(text);
+            Sounds.Play(Sounds.Kind.Copy);
+        }
+
         protected override void OnMouseUp(MouseEventArgs e)
         {
             if (!dragging || e.Button != MouseButtons.Left) return;
+            if (measure)
+            {
+                cur = e.Location; var area = Selection(); dragging = false;
+                CopyMeasure(area);
+                redrawAll = true; Update2();
+                return;
+            }
             cur = e.Location; dragging = false;
             var r = Selection();
             if (r.Width < 4 || r.Height < 4)
@@ -568,7 +661,7 @@ namespace Glint
                 Native.SetCursorPos(c.X + (code == Keys.Left ? -step : code == Keys.Right ? step : 0), c.Y + (code == Keys.Up ? -step : code == Keys.Down ? step : 0));
                 return true;
             }
-            if (code == Keys.Tab && !pickOnly && !dragging) { if (picker) LeavePicker(); else EnterPicker(); return true; }
+            if (code == Keys.Tab && !pickOnly && !measure && !dragging) { if (picker) LeavePicker(); else EnterPicker(); return true; }
             if (picker && (code == Keys.Tab || code == Keys.Return || code == Keys.Space))
             {
                 Pick(Sample((k & Keys.Shift) != 0));
