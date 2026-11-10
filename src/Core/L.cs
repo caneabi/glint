@@ -257,6 +257,7 @@ namespace Glint
             {"Nur kopieren", "Copy only"},
             {"Farbwähler", "Color picker"},
             {"Bildschirm messen", "Measure screen"},
+            {"Lineal", "Ruler"},
             {"Ziehen", "Drag"},
             {"Fläche messen", "Measure area"},
             {"Link nach Upload", "Link after upload"},

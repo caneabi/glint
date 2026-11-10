@@ -34,13 +34,16 @@ namespace Glint
 
         public static bool Active;
 
-        readonly bool measure; // ruler mode: distances to the next edge, drag measures an area
+        bool measure; // ruler mode: distances to the next edge, drag measures an area
+        readonly bool measureOnly; // opened as ruler, M switches it on and off while snipping
+        Bitmap measureShot; // live mode has no frozen shot, the ruler takes one when it starts
+        int pw, ph;
         int[] pixels; // measure mode: the frozen shot as plain ints, GetPixel is too slow for edge search
 
         public Overlay(bool windowMode, bool pickColor = false, bool measureMode = false)
         {
             var s = Settings.Current;
-            measure = measureMode;
+            measure = measureOnly = measureMode;
             frozen = s.Freeze || measure;
             picker = pickOnly = pickColor;
             snap = !picker && !measure && (windowMode || s.Snap);
@@ -49,13 +52,7 @@ namespace Glint
             if (frozen)
             {
                 shot = Imaging.Grab(virt);
-                if (measure)
-                {
-                    var d = shot.LockBits(new Rectangle(0, 0, shot.Width, shot.Height), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
-                    pixels = new int[shot.Width * shot.Height];
-                    Marshal.Copy(d.Scan0, pixels, 0, pixels.Length);
-                    shot.UnlockBits(d);
-                }
+                if (measure) LoadPixels(shot);
                 dim = new Bitmap(shot.Width, shot.Height, PixelFormat.Format32bppPArgb);
                 using (var g = Graphics.FromImage(dim))
                 {
@@ -158,7 +155,8 @@ namespace Glint
         List<Tuple<string, string, bool>> HintItems()
         {
             if (measure) return new List<Tuple<string, string, bool>> {
-                Tuple.Create("Esc", L.T("Schließen"), false), Tuple.Create(L.T("Klick"), L.T("Kopieren"), false), Tuple.Create(L.T("Ziehen"), L.T("Fläche messen"), false) };
+                Tuple.Create("Esc", L.T("Schließen"), false), Tuple.Create(L.T("Klick"), L.T("Kopieren"), false), Tuple.Create(L.T("Ziehen"), L.T("Fläche messen"), false),
+                Tuple.Create("M", L.T("Zurück"), true) }.Take(measureOnly ? 3 : 4).ToList();
             if (picker)
             {
                 var pick = new List<Tuple<string, string, bool>> {
@@ -170,7 +168,8 @@ namespace Glint
                 Tuple.Create("Esc", L.T("Abbrechen"), false),
                 Tuple.Create("W", "Snap", snap),
                 Tuple.Create("C", L.T("Fadenkreuz"), Settings.Current.Crosshair),
-                Tuple.Create("Tab", L.T("Farbwähler"), false) };
+                Tuple.Create("Tab", L.T("Farbwähler"), false),
+                Tuple.Create("M", L.T("Lineal"), false) };
             if (dragging) items.Insert(1, Tuple.Create(L.T("Leertaste"), L.T("Verschieben"), moving));
             return items;
         }
@@ -299,7 +298,7 @@ namespace Glint
             var r = Highlight();
             g.CompositingMode = CompositingMode.SourceCopy;
             if (frozen) g.DrawImage(picker || measure ? shot : dim, clip, clip, GraphicsUnit.Pixel);
-            else using (var b = new SolidBrush(Color.FromArgb(picker ? 1 : 120, 0, 0, 0))) g.FillRectangle(b, clip);
+            else using (var b = new SolidBrush(Color.FromArgb(picker || measure ? 1 : 120, 0, 0, 0))) g.FillRectangle(b, clip);
             bool any = r.Width > 0 && r.Height > 0;
             if (any)
             {
@@ -351,6 +350,30 @@ namespace Glint
         {
             picker = true; snap = false;
             if (!cursorHidden) { Cursor.Hide(); cursorHidden = true; }
+            redrawAll = true;
+            Update2();
+        }
+
+        void LoadPixels(Bitmap src)
+        {
+            pw = src.Width; ph = src.Height;
+            var d = src.LockBits(new Rectangle(0, 0, pw, ph), ImageLockMode.ReadOnly, PixelFormat.Format32bppArgb);
+            pixels = new int[pw * ph];
+            Marshal.Copy(d.Scan0, pixels, 0, pixels.Length);
+            src.UnlockBits(d);
+        }
+
+        void EnterMeasure()
+        {
+            if (pixels == null) LoadPixels(shot ?? (measureShot = Imaging.Grab(virt, false)));
+            measure = true; snap = false;
+            redrawAll = true;
+            Update2();
+        }
+
+        void LeaveMeasure()
+        {
+            measure = false; snap = Settings.Current.Snap;
             redrawAll = true;
             Update2();
         }
@@ -527,15 +550,30 @@ namespace Glint
             cur = e.Location; Update2();
         }
 
+        // Hard stops for the ruler: the window under the cursor, or the desktop without the taskbar, never past the monitor.
+        Rectangle MeasureBounds(Point p)
+        {
+            var sp = new Point(p.X + virt.X, p.Y + virt.Y);
+            var screen = Screen.FromPoint(sp);
+            var info = HoverInfo();
+            Rectangle r = info.HasValue && !info.Value.Desktop ? Rectangle.Intersect(info.Value.R, screen.Bounds) : screen.WorkingArea;
+            if (!r.Contains(sp)) r = screen.Bounds;
+            r.Offset(-virt.X, -virt.Y);
+            r.Intersect(new Rectangle(0, 0, pw, ph));
+            return r;
+        }
+
         // Edge search: walks from the point until the color changes noticeably.
         int[] Span(Point p, bool horizontal)
         {
-            int w = shot.Width, h = shot.Height;
+            int w = pw, h = ph;
             if (p.X < 0 || p.Y < 0 || p.X >= w || p.Y >= h) return new[] { 0, 0 };
-            int start = pixels[p.Y * w + p.X], lo = horizontal ? p.X : p.Y, hi = lo, max = (horizontal ? w : h) - 1;
+            var bounds = MeasureBounds(p);
+            int start = pixels[p.Y * w + p.X], lo = horizontal ? p.X : p.Y, hi = lo;
+            int min = horizontal ? bounds.Left : bounds.Top, max = (horizontal ? bounds.Right : bounds.Bottom) - 1;
             Func<int, int> at = i => horizontal ? pixels[p.Y * w + i] : pixels[i * w + p.X];
             Func<int, bool> same = v => Math.Abs(((v >> 16) & 255) - ((start >> 16) & 255)) + Math.Abs(((v >> 8) & 255) - ((start >> 8) & 255)) + Math.Abs((v & 255) - (start & 255)) < 30;
-            while (lo > 0 && same(at(lo - 1))) lo--;
+            while (lo > min && same(at(lo - 1))) lo--;
             while (hi < max && same(at(hi + 1))) hi++;
             return new[] { lo, hi + 1 };
         }
@@ -637,8 +675,10 @@ namespace Glint
 
         protected override void OnKeyDown(KeyEventArgs e)
         {
-            if (e.KeyCode == Keys.Escape) Close();
-            else if (e.KeyCode == Keys.W) { snap = !snap; Update2(); }
+            if (e.KeyCode == Keys.Escape) { Close(); return; }
+            if (e.KeyCode == Keys.M && !pickOnly && !measureOnly && !picker && !dragging) { if (measure) LeaveMeasure(); else EnterMeasure(); return; }
+            if (picker || measure) return; // only the keys the bar shows
+            if (e.KeyCode == Keys.W) { snap = !snap; Update2(); }
             else if (e.KeyCode == Keys.C)
             {
                 Settings.Current.Crosshair = !Settings.Current.Crosshair;
@@ -702,6 +742,7 @@ namespace Glint
             if (d)
             {
                 Active = false;
+                if (measureShot != null) { measureShot.Dispose(); measureShot = null; }
                 if (cursorHidden) { Cursor.Show(); cursorHidden = false; }
                 if (shot != null) { shot.Dispose(); dim.Dispose(); }
                 if (buffer != null) buffer.Dispose();
