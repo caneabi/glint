@@ -31,8 +31,8 @@ namespace Glint
         {
             var g = Begin(e);
             var r = new RectangleF(.5f, .5f, LW - 1, LH - 1);
-            Ui.Pill(g, r, Ui.Side, 20);
-            using (var path = Renderer.Round(r, 20)) using (var p = new Pen(isError ? Ui.Accent : Ui.Well)) g.DrawPath(p, path);
+            Ui.Pill(g, r, Ui.Side, LH - 1);
+            using (var path = Renderer.Round(r, LH - 1)) using (var p = new Pen(isError ? Ui.Accent : Ui.Well)) g.DrawPath(p, path);
             if (isError)
             {
                 using (var b = new SolidBrush(Ui.Accent)) g.FillEllipse(b, 13, LH / 2 - 7, 14, 14);

@@ -13,13 +13,15 @@ namespace Glint
     {
         public static Color WithOpacity(Obj o) { return Color.FromArgb(o.Opacity * 255 / 100, o.Color); }
 
-        public static Bitmap Compose(Bitmap src, List<Obj> objs, Bitmap into = null)
+        // clip: only that area is redrawn, the rest of 'into' stays as it is.
+        public static Bitmap Compose(Bitmap src, List<Obj> objs, Bitmap into = null, Rectangle? clip = null)
         {
             var c = into ?? new Bitmap(src.Width, src.Height, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(c))
             {
                 g.CompositingMode = CompositingMode.SourceCopy;
-                g.DrawImageUnscaled(src, 0, 0);
+                if (clip.HasValue) { g.SetClip(clip.Value); g.DrawImage(src, clip.Value, clip.Value, GraphicsUnit.Pixel); }
+                else g.DrawImageUnscaled(src, 0, 0);
                 g.CompositingMode = CompositingMode.SourceOver;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 var spots = objs.Where(o => o.Kind == Kind.Spotlight).ToList();
@@ -112,9 +114,11 @@ namespace Glint
             }
         }
 
+        public static float TextSize(Obj o) { return o.Size > 0 ? o.Size : 14 + o.Width * 3; }
+
         public static Font TextFont(Obj o)
         {
-            return new Font(o.Hand ? "Segoe Print" : "Segoe UI", 14 + o.Width * 3, FontStyle.Bold, GraphicsUnit.Pixel);
+            return new Font(o.Hand ? "Segoe Print" : o.Font, TextSize(o), FontStyle.Bold, GraphicsUnit.Pixel);
         }
 
         public static Color Contrast(Color c) { return c.R * .299 + c.G * .587 + c.B * .114 > 150 ? Color.Black : Color.White; }
@@ -154,13 +158,17 @@ namespace Glint
         {
             var r = Rectangle.Round(o.Box);
             if (r.Width < 4 || r.Height < 4) return;
-            var srcR = new Rectangle(r.X + r.Width / 4, r.Y + r.Height / 4, r.Width / 2, r.Height / 2);
+            float z = Math.Max(1.25f, o.Zoom);
+            int sw = Math.Max(1, (int)(r.Width / z)), sh = Math.Max(1, (int)(r.Height / z));
+            var srcR = new Rectangle(r.X + (r.Width - sw) / 2, r.Y + (r.Height - sh) / 2, sw, sh);
             srcR.Intersect(new Rectangle(0, 0, canvas.Width, canvas.Height));
             if (srcR.Width < 1 || srcR.Height < 1) return;
             using (var copy = canvas.Clone(srcR, PixelFormat.Format32bppArgb))
             using (var path = new GraphicsPath())
             {
-                path.AddEllipse(r);
+                if (o.Shape == 1) path.AddPath(Round(r, Math.Min(r.Width, r.Height) * .3f), false);
+                else if (o.Shape == 2) path.AddRectangle(r);
+                else path.AddEllipse(r);
                 var st = g.Save();
                 g.SetClip(path);
                 g.InterpolationMode = InterpolationMode.NearestNeighbor; g.PixelOffsetMode = PixelOffsetMode.Half;
@@ -288,29 +296,70 @@ namespace Glint
             p.CloseFigure(); return p;
         }
 
-        public static Bitmap Backdrop(Bitmap img, int preset, int pad)
+        public static Color[] Custom(Color c) { return new[] { c, Color.FromArgb((c.R + 255) / 2, (c.G + 255) / 2, (c.B + 255) / 2) }; }
+
+        public static Bitmap Backdrop(Bitmap img, Color[] cols, int pad)
         {
-            var o = new Bitmap(img.Width + pad * 2, img.Height + pad * 2, PixelFormat.Format32bppArgb);
+            var o = BackdropBase(img.Width, img.Height, cols, pad);
+            BackdropCompose(o, img, pad, o);
+            return o;
+        }
+
+        // Gradient and shadow only. It doesn't change while editing, so the editor keeps it.
+        public static Bitmap BackdropBase(int w, int h, Color[] cols, int pad)
+        {
+            var o = new Bitmap(w + pad * 2, h + pad * 2, PixelFormat.Format32bppArgb);
             using (var g = Graphics.FromImage(o))
             {
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 var all = new Rectangle(0, 0, o.Width, o.Height);
-                var cols = Gradients[preset % Gradients.Length];
                 using (var br = new LinearGradientBrush(all, cols[0], cols[1], 45f)) g.FillRectangle(br, all);
-                var inner = new RectangleF(pad, pad, img.Width, img.Height);
+                var inner = new RectangleF(pad, pad, w, h);
                 for (int i = 14; i > 0; i--)
                 {
                     var s = inner; s.Inflate(i, i); s.Offset(0, 5);
                     using (var path = Round(s, 20 + i)) using (var b = new SolidBrush(Color.FromArgb(7, 0, 0, 0))) g.FillPath(b, path);
                 }
-                using (var path = Round(inner, 18))
+            }
+            return o;
+        }
+
+        // Puts the image with rounded corners onto a copy of the base.
+        // area (image coordinates): only that part changed since the last call.
+        public static void BackdropCompose(Bitmap bg, Bitmap img, int pad, Bitmap into, Rectangle? area = null)
+        {
+            using (var g = Graphics.FromImage(into))
+            {
+                const int d = 18, r = d / 2;
+                g.CompositingMode = CompositingMode.SourceCopy;
+                if (area.HasValue)
+                {
+                    var a = area.Value;
+                    g.DrawImage(img, new Rectangle(a.X + pad, a.Y + pad, a.Width, a.Height), a, GraphicsUnit.Pixel);
+                    var inner = Rectangle.Inflate(new Rectangle(0, 0, img.Width, img.Height), -r, -r);
+                    if (inner.Contains(a)) return; // no corner touched
+                }
+                else
+                {
+                    if (into != bg) g.DrawImageUnscaled(bg, 0, 0);
+                    // A straight copy is fast, only the four corners need the rounded shape.
+                    g.DrawImageUnscaled(img, pad, pad);
+                }
+                g.CompositingMode = CompositingMode.SourceOver;
+                g.SmoothingMode = SmoothingMode.AntiAlias;
+                using (var path = Round(new RectangleF(pad, pad, img.Width, img.Height), d))
                 using (var tb = new TextureBrush(img, WrapMode.Clamp))
                 {
                     tb.TranslateTransform(pad, pad);
-                    g.FillPath(tb, path);
+                    foreach (var corner in new[] { new Rectangle(pad, pad, r, r), new Rectangle(pad + img.Width - r, pad, r, r), new Rectangle(pad, pad + img.Height - r, r, r), new Rectangle(pad + img.Width - r, pad + img.Height - r, r, r) })
+                    {
+                        if (into != bg) g.DrawImage(bg, corner, corner, GraphicsUnit.Pixel);
+                        g.SetClip(corner);
+                        g.FillPath(tb, path);
+                        g.ResetClip();
+                    }
                 }
             }
-            return o;
         }
     }
 }

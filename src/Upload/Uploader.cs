@@ -57,7 +57,7 @@ namespace Glint
                 });
                 Log.Info("Upload nach " + d.Name + ": " + url);
                 Sounds.Play(Sounds.Kind.Upload);
-                try { Clipboard.SetText(url); return true; }
+                try { Clipboard.SetText(Settings.Current.LinkFormat == "markdown" ? "![](" + url + ")" : url); return true; }
                 catch (System.Runtime.InteropServices.ExternalException ex) { Log.Error("Zwischenablage", ex); return false; }
             }
             finally { copy.Dispose(); }

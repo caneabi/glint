@@ -17,7 +17,7 @@ namespace Glint
     {
         public static bool NoSave; // test hook
         const int SideW = 200, TopH = 36;
-        static readonly string[] PageIcons = { "sun", "crop", "keyboard", "image", "volume-2", "download", "cloud-upload", "info" };
+        static readonly string[] PageIcons = { "sun", "crop", "keyboard", "image", "volume-2", "download", "cloud-upload", "droplet", "info" };
         string[] PageNames;
         readonly List<SettingsPage> pages = new List<SettingsPage>();
         readonly Dictionary<string, KeyRecorder> boxes = new Dictionary<string, KeyRecorder>(), previewBoxes = new Dictionary<string, KeyRecorder>(), panelBoxes = new Dictionary<string, KeyRecorder>();
@@ -65,7 +65,7 @@ namespace Glint
         void BuildPages()
         {
             Text = L.T("Glint – Einstellungen");
-            PageNames = new[] { L.T("Allgemein"), L.T("Aufnahme"), L.T("Tastenkürzel"), L.T("Schwebendes Fenster"), L.T("Töne"), L.T("Ausgabe"), "Upload", "Info" };
+            PageNames = new[] { L.T("Allgemein"), L.T("Aufnahme"), L.T("Tastenkürzel"), L.T("Schwebendes Fenster"), L.T("Töne"), L.T("Ausgabe"), "Upload", L.T("Erscheinungsbild"), "Info" };
             var s = Settings.Current;
             var size = new Size(ClientSize.Width - Ui.S(SideW), ClientSize.Height - Ui.S(TopH));
 
@@ -160,12 +160,20 @@ namespace Glint
             var scale = new Segmented(new[] { "100", "75", "50", "25" }, new[] { "100 %", "75 %", "50 %", "25 %" }, s.OutputScale.ToString(), 230);
             scale.Changed = () => s.OutputScale = int.Parse(scale.Value);
             p.AddRow(L.T("Ausgabegröße"), scale);
+            var link = new Segmented(new[] { "url", "markdown" }, new[] { "URL", "Markdown" }, s.LinkFormat, 230);
+            link.Changed = () => s.LinkFormat = link.Value;
+            p.AddRow(L.T("Link nach Upload"), link);
             p.AddBlock(L.T("Dateiname beim Speichern"), new FileNameEditor(s.FileNameSave, false, ".png", v => s.FileNameSave = v), 104);
             p.AddBlock(L.T("Dateiname beim Hochladen"), new FileNameEditor(s.FileNameUpload, true, ".png", v => s.FileNameUpload = v), 104);
             p.AddBlock(L.T("Variablen"), new FileNameVars(), 124);
 
             uploadPage = NewPage("Upload", size, L.T("Der Schalter wählt das aktive Ziel, Hotkeys laden direkt hoch."));
             BuildUploadPage();
+
+            p = NewPage(L.T("Erscheinungsbild"), size, L.T("Wie Glint aussieht."));
+            var glass = new Toggle(s.GlassBlur);
+            glass.Changed = () => { s.GlassBlur = glass.On; s.Save(); Glass.ApplyBlurSetting(); };
+            p.AddRow(L.T("Glas-Effekt mit Unschärfe"), glass);
 
             p = NewPage("Info", size, L.T("Version, Logs und Einrichtung."));
             var checkNow = new PillButton(L.T("Jetzt suchen"), 110);

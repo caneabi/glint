@@ -29,7 +29,9 @@ namespace Glint
 
         public static int S(float v) { return (int)Math.Round(v * F); }
         public static Size S(int w, int h) { return new Size(S(w), S(h)); }
-        public const int Pad = 28, RowH = 44, CardRadius = 22, ControlRadius = 14;
+        public const int Pad = 28, RowH = 44;
+        // Corner sizes as diameters (Renderer.Round takes diameters): surfaces, controls, small bits. Pills use their height.
+        public const int CardRadius = 24, ControlRadius = 14, SmallRadius = 8;
 
         public static void Prepare(Graphics g)
         {

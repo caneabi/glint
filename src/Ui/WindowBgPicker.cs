@@ -90,7 +90,7 @@ namespace Glint
             {
                 var t = Tile(i);
                 bool on = s.WindowBg == Modes[i];
-                using (var path = Renderer.Round(t, 16))
+                using (var path = Renderer.Round(t, Ui.ControlRadius))
                 {
                     var st = g.Save();
                     g.SetClip(path, CombineMode.Intersect);

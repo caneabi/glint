@@ -14,6 +14,8 @@ namespace Glint
         public Kind Kind; public PointF A, B; public PointF? Ctrl;
         public Color Color = Color.FromArgb(255, 94, 91); public float Width = 4; public bool Fill, Hand; public int Opacity = 100;
         public string Text = ""; public int Num; public List<PointF> Pts; public Bitmap Img; public int Seed = 7;
+        public string Font = "Segoe UI"; public float Size; // text, Size 0 follows the stroke width
+        public int Zoom = 2, Shape; // magnifier, Shape: 0 circle, 1 rounded, 2 square
         public RectangleF Box { get { return RectangleF.FromLTRB(Math.Min(A.X, B.X), Math.Min(A.Y, B.Y), Math.Max(A.X, B.X), Math.Max(A.Y, B.Y)); } }
         public bool IsLine { get { return Kind == Kind.Arrow || Kind == Kind.Line || Kind == Kind.Measure; } }
         public Obj Clone()

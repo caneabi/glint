@@ -133,7 +133,7 @@ namespace Glint
             Ui.Prepare(g);
             g.ScaleTransform(Ui.F, Ui.F);
             var r = SquareRect;
-            using (var path = Renderer.Round(r, 16))
+            using (var path = Renderer.Round(r, Ui.ControlRadius))
             {
                 var st = g.Save();
                 g.SetClip(path);
@@ -165,7 +165,7 @@ namespace Glint
             {
                 Ui.Pill(g, SwatchRect(i), Presets[i], 10);
                 if (Presets[i].GetBrightness() < .2f)
-                    using (var path = Renderer.Round(SwatchRect(i), 10)) using (var p = new Pen(Ui.Line)) g.DrawPath(p, path);
+                    using (var path = Renderer.Round(SwatchRect(i), Ui.SmallRadius)) using (var p = new Pen(Ui.Line)) g.DrawPath(p, path);
             }
             Ui.Pill(g, new RectangleF(Pad, HexTop, 38, 28), Value, Ui.ControlRadius);
         }

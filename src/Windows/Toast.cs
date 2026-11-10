@@ -36,8 +36,9 @@ namespace Glint
             Location = new Point(wa.Right - Width - 18, wa.Bottom - Height - 18);
             using (var p = new GraphicsPath())
             {
-                p.AddArc(0, 0, 14, 14, 180, 90); p.AddArc(Width - 15, 0, 14, 14, 270, 90);
-                p.AddArc(Width - 15, Height - 15, 14, 14, 0, 90); p.AddArc(0, Height - 15, 14, 14, 90, 90); p.CloseFigure();
+                int d = Height; // pill, like the in-window banner
+                p.AddArc(0, 0, d, d, 180, 90); p.AddArc(Width - d - 1, 0, d, d, 270, 90);
+                p.AddArc(Width - d - 1, Height - d - 1, d, d, 0, 90); p.AddArc(0, Height - d - 1, d, d, 90, 90); p.CloseFigure();
                 Region = new Region(p);
             }
             var t = new Timer { Interval = ms };

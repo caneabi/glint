@@ -8,9 +8,13 @@ using System.Windows.Forms;
 namespace Glint
 {
     // Picked colors: two slots with their contrast, every format to copy, recent history.
-    class ColorPanel : ResizableForm
+    class ColorPanel : Glass
     {
-        const int W = 320, H = 478, Pad = 20, HistoryMax = 12;
+        const int W = 320, H0 = 478, PaletteH = 62, Pad = 20, HistoryMax = 12;
+        readonly List<Color> palette = new List<Color>();
+        int H { get { return H0 + (palette.Count > 0 ? PaletteH : 0); } }
+        int hoverPalette = -1;
+        Bitmap content; bool contentDirty = true; // the blur repaints often, the content only when it changes
         static ColorPanel instance;
 
         readonly Color[] slots = { Color.White, Color.Black };
@@ -25,9 +29,23 @@ namespace Glint
         static readonly Rectangle PickR = new Rectangle(W - 80, 14, 28, 28), CloseR = new Rectangle(W - 46, 14, 28, 28),
             SwapR = new Rectangle(W / 2 - 14, 86, 28, 28);
         static Rectangle SlotR(int i) { int w = (W - Pad * 2 - 12) / 2; return new Rectangle(Pad + i * (w + 12), 54, w, 86); }
-        const int ContrastY = 152, FormatsY = 230, RowH = 34, HistoryY = 420;
+        const int ContrastY = 152, FormatsY = 230, RowH = 34, PaletteY = 420;
+        int HistoryY { get { return PaletteY + (palette.Count > 0 ? PaletteH : 0); } }
+        static Rectangle SwatchR(int i) { return new Rectangle(Pad + i * 46, PaletteY + 22, 40, 24); }
+        static readonly Rectangle CopyAllR = new Rectangle(W - Pad - 90, PaletteY - 2, 90, 20);
         static Rectangle RowR(int i) { return new Rectangle(Pad, FormatsY + i * RowH, W - Pad * 2, RowH); }
-        static Rectangle DotR(int i) { return new Rectangle(Pad + i * 24, HistoryY + 22, 18, 18); }
+        Rectangle DotR(int i) { return new Rectangle(Pad + i * 24, HistoryY + 22, 18, 18); }
+
+        // A dragged area: its main colors become a palette, the first one is picked.
+        public static void OpenPalette(List<Color> colors)
+        {
+            if (instance == null || instance.IsDisposed) instance = new ColorPanel();
+            instance.palette.Clear(); instance.palette.AddRange(colors);
+            instance.ClientSize = new Size(Ui.S(W) + S * 2, Ui.S(instance.H) + S * 2);
+            Open(colors[0]);
+        }
+
+        protected override void OnInvalidated(InvalidateEventArgs e) { contentDirty = true; base.OnInvalidated(e); }
 
         public static void Open(Color c)
         {
@@ -52,7 +70,7 @@ namespace Glint
         {
             PlaceNearCursor();
             targetTop = Top;
-            Opacity = 0;
+            Alpha = 0;
             Top = targetTop + Slide;
             Show();
             appearClock.Restart();
@@ -67,7 +85,7 @@ namespace Glint
             if (appearClock.IsRunning)
             {
                 float t = Math.Min(1, appearClock.ElapsedMilliseconds / (float)AppearMs), e = EaseOut(t);
-                Opacity = e;
+                Alpha = (byte)Math.Round(255 * e);
                 Top = targetTop + (int)Math.Round(Slide * (1 - e));
                 if (t >= 1) appearClock.Reset(); else running = true;
             }
@@ -89,9 +107,8 @@ namespace Glint
         ColorPanel()
         {
             Text = L.T("Glint – Farbe");
-            ShowInTaskbar = false; TopMost = true; StartPosition = FormStartPosition.Manual; Font = Ui.Font;
-            ClientSize = Ui.S(W, H);
-            MinimumSize = MaximumSize = Size;
+            Font = Ui.Font;
+            ClientSize = new Size(Ui.S(W) + S * 2, Ui.S(H) + S * 2);
             KeyPreview = true;
             var history = Settings.Current.ColorHistory;
             // The last pick becomes the background for the new one.
@@ -133,12 +150,30 @@ namespace Glint
             return r;
         }
 
-        static Point Logical(Point p) { return new Point((int)(p.X / Ui.F), (int)(p.Y / Ui.F)); }
+        protected override Rectangle PanelRect { get { return new Rectangle(S, S, Ui.S(W), Ui.S(H)); } }
+        protected override void OnShown(EventArgs e) { base.OnShown(e); Activate(); }
 
-        protected override bool IsControlAt(Point p)
+        static Point Logical(Point p) { return new Point((int)((p.X - S) / Ui.F), (int)((p.Y - S) / Ui.F)); }
+
+        // Free glass moves the window, controls take clicks.
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == 0x84)
+            {
+                long lp = m.LParam.ToInt64();
+                m.Result = new IntPtr(IsControlAt(PointToClient(new Point((short)(lp & 0xFFFF), (short)((lp >> 16) & 0xFFFF))) ) ? 1 : 2);
+                return;
+            }
+            if (m.Msg == 0x20 && (m.LParam.ToInt64() & 0xFFFF) == 2) { Cursor.Current = Cursors.SizeAll; m.Result = new IntPtr(1); return; }
+            base.WndProc(ref m);
+        }
+
+        bool IsControlAt(Point p)
         {
             var l = Logical(p);
             if (PickR.Contains(l) || CloseR.Contains(l) || SwapR.Contains(l) || SlotR(0).Contains(l) || SlotR(1).Contains(l)) return true;
+            if (palette.Count > 0 && CopyAllR.Contains(l)) return true;
+            for (int i = 0; i < palette.Count; i++) if (SwatchR(i).Contains(l)) return true;
             for (int i = 0; i < Colors.Formats.Length; i++) if (RowR(i).Contains(l)) return true;
             for (int i = 0; i < History().Count; i++) if (DotR(i).Contains(l)) return true;
             return false;
@@ -147,22 +182,33 @@ namespace Glint
         protected override void OnMouseMove(MouseEventArgs e)
         {
             var l = Logical(e.Location);
-            int row = -1, dot = -1;
+            int row = -1, dot = -1, sw = -1;
+            for (int i = 0; i < palette.Count; i++) if (SwatchR(i).Contains(l)) sw = i;
+            if (sw != hoverPalette) { hoverPalette = sw; Invalidate(); }
             for (int i = 0; i < Colors.Formats.Length; i++) if (RowR(i).Contains(l)) row = i;
             for (int i = 0; i < History().Count; i++) if (DotR(i).Contains(l)) dot = i;
             string button = PickR.Contains(l) ? "pick" : CloseR.Contains(l) ? "close" : SwapR.Contains(l) ? "swap" : null;
             if (row != hoverRow || dot != hoverHistory || button != hoverButton) { hoverRow = row; hoverHistory = dot; hoverButton = button; Invalidate(); }
-            Cursor = row >= 0 || dot >= 0 || button != null || SlotR(0).Contains(l) || SlotR(1).Contains(l) ? Cursors.Hand : Cursors.Default;
+            Cursor = row >= 0 || dot >= 0 || sw >= 0 || button != null || SlotR(0).Contains(l) || SlotR(1).Contains(l) || (palette.Count > 0 && CopyAllR.Contains(l)) ? Cursors.Hand : Cursors.Default;
         }
 
         protected override void OnMouseLeave(EventArgs e) { hoverRow = hoverHistory = -1; hoverButton = null; Invalidate(); base.OnMouseLeave(e); }
 
+        void Swap() { var t = slots[0]; slots[0] = slots[1]; slots[1] = t; Invalidate(); }
+
+        string PaletteText() { return string.Join(", ", palette.Select(c => Colors.Format(c, Settings.Current.ColorFormat))); }
+
+        void CopyText(string text) { Clipboard.SetText(text); Sounds.Play(Sounds.Kind.Copy); }
+
         protected override void OnMouseDown(MouseEventArgs e)
         {
             var l = Logical(e.Location);
+            if (e.Button != MouseButtons.Left) return;
+            if (palette.Count > 0 && CopyAllR.Contains(l)) { CopyText(PaletteText()); return; }
+            for (int i = 0; i < palette.Count; i++) if (SwatchR(i).Contains(l)) { slots[active] = palette[i]; Invalidate(); return; }
             if (CloseR.Contains(l)) { Close(); return; }
             if (PickR.Contains(l)) { PickAgain(); return; }
-            if (SwapR.Contains(l)) { var t = slots[0]; slots[0] = slots[1]; slots[1] = t; Invalidate(); return; }
+            if (SwapR.Contains(l)) { Swap(); return; }
             for (int i = 0; i < 2; i++) if (SlotR(i).Contains(l)) { active = next = i; Invalidate(); return; }
             for (int i = 0; i < Colors.Formats.Length; i++) if (RowR(i).Contains(l)) { CopyRow(i); return; }
             var history = History();
@@ -203,16 +249,30 @@ namespace Glint
                     case "copy": CopyRow(standard); break;
                     case "close": Close(); break;
                     case "pick": PickAgain(); break;
-                    case "swap": var t = slots[0]; slots[0] = slots[1]; slots[1] = t; Invalidate(); break;
+                    case "swap": Swap(); break;
                 }
                 return true;
             }
             return base.ProcessCmdKey(ref m, k);
         }
 
-        protected override void OnPaint(PaintEventArgs e)
+        public override void PaintTo(Graphics g)
         {
-            var g = e.Graphics; Ui.Prepare(g);
+            DrawPanel(g, PanelRect, Ui.S(Ui.CardRadius));
+            if (content == null || content.Size != ClientSize || contentDirty)
+            {
+                if (content == null || content.Size != ClientSize) { if (content != null) content.Dispose(); content = new Bitmap(ClientSize.Width, ClientSize.Height); }
+                using (var cg = Graphics.FromImage(content)) { cg.Clear(Color.Transparent); DrawContent(cg); }
+                contentDirty = false;
+            }
+            g.DrawImageUnscaled(content, 0, 0);
+        }
+
+        void DrawContent(Graphics g)
+        {
+            Ui.Prepare(g);
+            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit; // ClearType breaks on a transparent window
+            g.TranslateTransform(S, S);
             g.ScaleTransform(Ui.F, Ui.F);
             using (var b = new SolidBrush(Ui.Text)) g.DrawString(L.T("Farbe"), Head, b, Pad - 2, 17);
             IconButton(g, PickR, "droplet", "pick");
@@ -220,11 +280,12 @@ namespace Glint
 
             for (int i = 0; i < 2; i++) DrawSlot(g, i);
             using (var b = new SolidBrush(hoverButton == "swap" ? Ui.Well : Ui.Side)) g.FillEllipse(b, SwapR);
-            using (var p = new Pen(Ui.Bg, 3)) g.DrawEllipse(p, SwapR);
+            using (var p = new Pen(Color.FromArgb(34, 34, 37), 3)) g.DrawEllipse(p, SwapR);
             Icons.DrawLucide(g, "arrow-left-right", SwapR.X + 14, SwapR.Y + 14, 14, 1.6f, Ui.Text);
 
             DrawContrast(g);
             DrawFormats(g);
+            DrawPalette(g);
             DrawHistory(g);
         }
 
@@ -240,9 +301,9 @@ namespace Glint
             float s = PopScale(i);
             var r = Rectangle.Round(RectangleF.Inflate(full, -(1 - s) * full.Width / 2, -(1 - s) * full.Height / 2));
             var c = slots[i];
-            Ui.Pill(g, r, c, 18);
-            if (i == active) using (var path = Renderer.Round(RectangleF.Inflate(r, 2.5f, 2.5f), 22)) using (var p = new Pen(Ui.Accent, 2)) g.DrawPath(p, path);
-            else using (var path = Renderer.Round(r, 18)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
+            Ui.Pill(g, r, c, Ui.ControlRadius);
+            if (i == active) using (var path = Renderer.Round(RectangleF.Inflate(r, 2.5f, 2.5f), Ui.ControlRadius + 5)) using (var p = new Pen(Ui.Accent, 2)) g.DrawPath(p, path);
+            else using (var path = Renderer.Round(r, Ui.ControlRadius)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
             using (var b = new SolidBrush(Color.FromArgb(200, Renderer.Contrast(c))))
             {
                 g.DrawString(i == 0 ? L.T("Vordergrund") : L.T("Hintergrund"), Ui.Small, b, r.X + 12, r.Bottom - 38);
@@ -253,7 +314,7 @@ namespace Glint
         void DrawContrast(Graphics g)
         {
             var r = new Rectangle(Pad, ContrastY, W - Pad * 2, 66);
-            Ui.Pill(g, r, Ui.Card, 18);
+            Ui.Pill(g, r, Ui.Card, Ui.ControlRadius);
             double ratio = Colors.Wcag(slots[0], slots[1]), lc = Colors.Apca(slots[0], slots[1]);
             using (var b = new SolidBrush(Ui.Text)) g.DrawString(ratio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " : 1", Big, b, r.X + 12, r.Y + 8);
             using (var b = new SolidBrush(Ui.Dim)) g.DrawString("APCA Lc " + Math.Round(lc), Ui.Small, b, r.X + 14, r.Y + 42);
@@ -274,11 +335,11 @@ namespace Glint
         void DrawFormats(Graphics g)
         {
             var card = new Rectangle(Pad, FormatsY, W - Pad * 2, RowH * Colors.Formats.Length);
-            Ui.Pill(g, card, Ui.Card, 18);
+            Ui.Pill(g, card, Ui.Card, Ui.ControlRadius);
             for (int i = 0; i < Colors.Formats.Length; i++)
             {
                 var r = RowR(i);
-                if (i == hoverRow) using (var path = Renderer.Round(RectangleF.Inflate(r, -4, -3), 12)) using (var b = new SolidBrush(Ui.Well)) g.FillPath(b, path);
+                if (i == hoverRow) using (var path = Renderer.Round(RectangleF.Inflate(r, -4, -3), Ui.SmallRadius)) using (var b = new SolidBrush(Ui.Well)) g.FillPath(b, path);
                 if (i > 0) Ui.Hairline(g, r.X + 12, r.Y, r.Right - 12, r.Y);
                 using (var b = new SolidBrush(Ui.Dim)) g.DrawString(Colors.Formats[i].ToUpperInvariant(), Ui.Small, b, r.X + 12, r.Y + 9);
                 string value = Colors.Format(slots[active], Colors.Formats[i]);
@@ -287,6 +348,21 @@ namespace Glint
                     g.DrawString(value, Mono, b, new RectangleF(r.X + 64, r.Y, r.Width - 64 - 36, r.Height), sf);
                 if (i == copiedRow) Icons.DrawLucide(g, "check", r.Right - 20, r.Y + r.Height / 2f, 14, 2f, Color.FromArgb(52, 199, 89));
                 else if (i == hoverRow) Icons.DrawLucide(g, "copy", r.Right - 20, r.Y + r.Height / 2f, 13, 1.5f, Ui.Dim);
+            }
+        }
+
+        void DrawPalette(Graphics g)
+        {
+            if (palette.Count == 0) return;
+            using (var b = new SolidBrush(Ui.Dim)) g.DrawString("Palette", Ui.Small, b, Pad - 1, PaletteY);
+            using (var b = new SolidBrush(Ui.Accent))
+            using (var sf = new StringFormat { Alignment = StringAlignment.Far })
+                g.DrawString(L.T("Alle kopieren"), Ui.Small, b, new RectangleF(CopyAllR.X, CopyAllR.Y + 2, CopyAllR.Width, 18), sf);
+            for (int i = 0; i < palette.Count; i++)
+            {
+                var r = SwatchR(i);
+                Ui.Pill(g, r, palette[i], Ui.SmallRadius);
+                using (var path = Renderer.Round(r, Ui.SmallRadius)) using (var p = new Pen(i == hoverPalette ? Ui.Text : Color.FromArgb(50, 255, 255, 255), i == hoverPalette ? 2 : 1)) g.DrawPath(p, path);
             }
         }
 
@@ -304,6 +380,6 @@ namespace Glint
             }
         }
 
-        protected override void Dispose(bool d) { if (d) { copiedTimer.Dispose(); anim.Dispose(); } base.Dispose(d); }
+        protected override void Dispose(bool d) { if (d) { copiedTimer.Dispose(); anim.Dispose(); if (content != null) content.Dispose(); } base.Dispose(d); }
     }
 }

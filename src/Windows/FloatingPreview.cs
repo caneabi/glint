@@ -86,8 +86,8 @@ namespace Glint
 
         public override void PaintTo(Graphics g)
         {
-            DrawPanel(g, card, K(26));
-            using (var path = Renderer.Round(imgRect, K(14)))
+            DrawPanel(g, card, K(Ui.CardRadius));
+            using (var path = Renderer.Round(imgRect, K(Ui.CardRadius - MarginBase * 2))) // concentric with the card
             {
                 var st = g.Save();
                 g.SetClip(path);
@@ -97,7 +97,7 @@ namespace Glint
             for (int i = 0; i < rects.Length; i++)
             {
                 if (i == hover)
-                    using (var path = Renderer.Round(rects[i], K(14))) using (var b = new SolidBrush(Color.FromArgb(28, 255, 255, 255))) g.FillPath(b, path);
+                    using (var path = Renderer.Round(rects[i], K(Ui.ControlRadius))) using (var b = new SolidBrush(Color.FromArgb(28, 255, 255, 255))) g.FillPath(b, path);
                 Icons.DrawLucide(g, Icon[i], rects[i].X + rects[i].Width / 2f, rects[i].Y + rects[i].Height / 2f, K(17), Math.Max(1.2f, k * 1.35f), IconColor);
             }
             if (hoverDrag) Chip.Draw(g, L.T("In andere App ziehen"), imgRect);

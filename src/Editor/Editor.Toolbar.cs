@@ -43,9 +43,66 @@ namespace Glint
             add("rect", L.T("Rechteck  R"), Tool.Rect); add("blur", L.T("Weichzeichnen  B"), Tool.Blur); add("pen", L.T("Freihand  P"), Tool.Pen);
             add("crop", L.T("Zuschneiden  X"), Tool.Crop); add("oval", "Oval  O", Tool.Oval); add("line", L.T("Linie  L"), Tool.Line); add("step", L.T("Schrittzähler  N"), Tool.Step);
             add("highlight", L.T("Textmarker  H"), Tool.Highlight); add("spot", "Spotlight  S", Tool.Spotlight); add("mag", L.T("Lupe  M"), Tool.Magnifier);
-            add("pixel", L.T("Verpixeln  K"), Tool.Pixelate); add("erase", L.T("Entfernen  E"), Tool.Erase);
+            add("erase", L.T("Entfernen  E"), Tool.Erase);
             add("undo", L.T("Rückgängig  Strg+Z"), null); add("redo", L.T("Wiederholen  Strg+Y"), null); add("backdrop", "Backdrop", null); add("addcap", L.T("Aufnahme hinzufügen"), null);
             buttons.Add(new Btn { Id = "more", Tip = L.T("Weitere Werkzeuge") });
+        }
+
+        // Kind the attribute bar talks about: the selection, or what the current tool makes.
+        Kind? AttrKind { get { return sel != null ? sel.Kind : tool == Tool.Text ? Kind.Text : tool == Tool.Magnifier ? Kind.Magnifier : tool == Tool.Blur ? Kind.Blur : tool == Tool.Pixelate ? Kind.Pixelate : (Kind?)null; } }
+
+        List<Tuple<string, int, string>> AttrExtras()
+        {
+            var list = new List<Tuple<string, int, string>>();
+            if (AttrKind == Kind.Text) list.Add(Tuple.Create("font", 96, L.T("Schriftart")));
+            if (AttrKind == Kind.Magnifier) { list.Add(Tuple.Create("shape", 74, L.T("Form"))); list.Add(Tuple.Create("zoom", 40, "Zoom")); }
+            if (AttrKind == Kind.Blur || AttrKind == Kind.Pixelate) { list.Add(Tuple.Create("mode", 112, L.T("Weich oder Pixel"))); list.Add(Tuple.Create("strength", 120, L.T("Stärke"))); }
+            return list;
+        }
+
+        int EffectStrength { get { return (int)Math.Round(sel != null && (sel.Kind == Kind.Blur || sel.Kind == Kind.Pixelate) ? sel.Width : width); } }
+
+        // Two halves, the active one lit, like the segmented controls in the settings.
+        void DrawMode(Graphics g, Rectangle r, Font f, StringFormat sf)
+        {
+            bool pixel = AttrKind == Kind.Pixelate;
+            using (var path = Renderer.Round(r, Ui.ControlRadius)) using (var br = new SolidBrush(Color.FromArgb(46, 46, 49))) g.FillPath(br, path);
+            var half = new Rectangle(pixel ? r.X + r.Width / 2 : r.X, r.Y, r.Width / 2, r.Height);
+            using (var path = Renderer.Round(Rectangle.Inflate(half, -2, -2), Ui.ControlRadius - 4)) using (var br = new SolidBrush(Hover)) g.FillPath(br, path);
+            g.DrawString(L.T("Weich"), f, pixel ? Brushes.Silver : Brushes.White, new Rectangle(r.X, r.Y, r.Width / 2, r.Height), sf);
+            g.DrawString("Pixel", f, pixel ? Brushes.White : Brushes.Silver, new Rectangle(r.X + r.Width / 2, r.Y, r.Width / 2, r.Height), sf);
+        }
+
+        const int StrengthMax = 20;
+
+        void DrawStrength(Graphics g, Rectangle r, Font f)
+        {
+            float t = (EffectStrength - 1) / (float)(StrengthMax - 1), track = r.Width - 30, x = r.X + 6 + track * t, cy = r.Y + r.Height / 2f;
+            using (var path = Renderer.Round(new RectangleF(r.X + 6, cy - 2, track, 4), 4)) using (var br = new SolidBrush(Color.FromArgb(70, 70, 76))) g.FillPath(br, path);
+            using (var path = Renderer.Round(new RectangleF(r.X + 6, cy - 2, Math.Max(4, x - r.X - 6), 4), 4)) using (var br = new SolidBrush(Accent)) g.FillPath(br, path);
+            g.FillEllipse(Brushes.White, x - 6, cy - 6, 12, 12);
+            g.DrawString(EffectStrength.ToString(), f, Brushes.Silver, r.Right - 20, r.Y + 4);
+        }
+
+        void SetStrength(int mouseX)
+        {
+            var b = attrButtons.FirstOrDefault(x => x.Id == "strength");
+            if (b == null) return;
+            float t = Math.Max(0, Math.Min(1, (mouseX - b.R.X - 6) / (float)(b.R.Width - 30)));
+            int v = 1 + (int)Math.Round(t * (StrengthMax - 1));
+            width = v;
+            if (sel != null && (sel.Kind == Kind.Blur || sel.Kind == Kind.Pixelate)) { sel.Width = v; Recompose(); }
+            Invalidate();
+        }
+
+        static readonly string[] ShapeNames = { "Kreis", "Abgerundet", "Quadrat" };
+
+        string AttrLabel(string id)
+        {
+            if (id == "font") { string f = sel != null && sel.Kind == Kind.Text ? sel.Font : textFont; return f.Length > 13 ? f.Substring(0, 12) + "…" : f; }
+            if (id == "shape") return L.T(ShapeNames[sel != null && sel.Kind == Kind.Magnifier ? sel.Shape : magShape]);
+            if (id == "zoom") return (sel != null && sel.Kind == Kind.Magnifier ? sel.Zoom : magZoom) + "×";
+            return "";
         }
 
         bool AttrVisible { get { return sel != null || (tool != Tool.Select && tool != Tool.Crop && tool != Tool.Ruler); } }
@@ -94,7 +151,8 @@ namespace Glint
             attrPanel = Rectangle.Empty;
             if (AttrVisible)
             {
-                int pw = Palette.Length * 24 + 24 + 16 + 26 * 2 + 44 + 8 + 66 * 2 + 16 + 26 * 2 + 44 + 26;
+                var extras = AttrExtras();
+                int pw = Palette.Length * 24 + 24 + 16 + 26 * 2 + 44 + 8 + 66 * 2 + 16 + 26 * 2 + 44 + 26 + extras.Sum(ex => ex.Item2 + 4) + (extras.Count > 0 ? 12 : 0);
                 attrPanel = new Rectangle((cw - pw) / 2, BarH + 8, pw, 40);
                 int ax = attrPanel.X + 13, ay = attrPanel.Y;
                 for (int i = 0; i < Palette.Length; i++) { attrButtons.Add(new Btn { Id = "c" + i, Tip = L.T("Farbe"), R = new Rectangle(ax, ay + 11, 18, 18) }); ax += 24; }
@@ -108,6 +166,23 @@ namespace Glint
                     if (p[0] == "w+" || p[0] == "o+") ax += 44;
                     if (p[0] == "hand") ax += 12;
                 }
+                if (extras.Count > 0) ax += 12;
+                foreach (var ex in extras) { attrButtons.Add(new Btn { Id = ex.Item1, Tip = ex.Item3, R = new Rectangle(ax, ay + 8, ex.Item2, 24) }); ax += ex.Item2 + 4; }
+            }
+
+            // Backdrop choices, laid out like the color dots.
+            backdropBtns.Clear();
+            backdropPanel = Rectangle.Empty;
+            if (backdropOpen)
+            {
+                var bb = buttons.First(b => b.Id == "backdrop");
+                var anchor = bb.R.IsEmpty ? more.R : bb.R;
+                int n = Renderer.Gradients.Length + 2, pw = n * 28 + 18;
+                backdropPanel = new Rectangle(Math.Max(8, Math.Min(cw - pw - 8, anchor.X + anchor.Width / 2 - pw / 2)), (!attrPanel.IsEmpty ? attrPanel.Bottom : bb.R.Y >= BarH ? bb.R.Bottom : BarH) + 8, pw, 40); // below the attribute bar when both are open
+                int bx = backdropPanel.X + 12;
+                backdropBtns.Add(new Btn { Id = "bdoff", Tip = L.T("Aus"), R = new Rectangle(bx, backdropPanel.Y + 9, 22, 22) }); bx += 28;
+                for (int i = 0; i < Renderer.Gradients.Length; i++) { backdropBtns.Add(new Btn { Id = "bd" + i, Tip = "Backdrop", R = new Rectangle(bx, backdropPanel.Y + 9, 22, 22) }); bx += 28; }
+                backdropBtns.Add(new Btn { Id = "bdc", Tip = L.T("Eigene Farbe"), R = new Rectangle(bx, backdropPanel.Y + 9, 22, 22) });
             }
         }
 
@@ -217,7 +292,7 @@ namespace Glint
                 if (btn.R.IsEmpty || btn.R.Y >= BarH) continue;
                 bool on = btn.Tool == tool || (btn.Id == "backdrop" && backdrop >= 0) || (btn.Id == "more" && moreOpen);
                 if (on || btn == hover)
-                    using (var path = Renderer.Round(btn.R, 12)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(52, 52, 56))) g.FillPath(br, path);
+                    using (var path = Renderer.Round(btn.R, Ui.ControlRadius)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(52, 52, 56))) g.FillPath(br, path);
                 DrawButton(g, btn);
             }
 
@@ -232,22 +307,45 @@ namespace Glint
 
             if (!morePanel.IsEmpty)
             {
-                using (var path = Renderer.Round(morePanel, 20)) using (var br = new SolidBrush(Color.FromArgb(40, 40, 43))) g.FillPath(br, path);
-                using (var path = Renderer.Round(morePanel, 20)) using (var p = new Pen(Color.FromArgb(70, 70, 75))) g.DrawPath(p, path);
+                using (var path = Renderer.Round(morePanel, Ui.CardRadius)) using (var br = new SolidBrush(Color.FromArgb(40, 40, 43))) g.FillPath(br, path);
+                using (var path = Renderer.Round(morePanel, Ui.CardRadius)) using (var p = new Pen(Color.FromArgb(70, 70, 75))) g.DrawPath(p, path);
                 foreach (var btn in buttons)
                 {
                     if (btn.R.IsEmpty || btn.R.Y < BarH) continue;
                     bool on = btn.Tool == tool || (btn.Id == "backdrop" && backdrop >= 0);
                     if (on || btn == hover)
-                        using (var path = Renderer.Round(btn.R, 12)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(58, 58, 62))) g.FillPath(br, path);
+                        using (var path = Renderer.Round(btn.R, Ui.ControlRadius)) using (var br = new SolidBrush(on ? Hover : Color.FromArgb(58, 58, 62))) g.FillPath(br, path);
                     DrawButton(g, btn);
+                }
+            }
+
+            if (!backdropPanel.IsEmpty)
+            {
+                using (var path = Renderer.Round(backdropPanel, Ui.CardRadius)) using (var br = new SolidBrush(Color.FromArgb(240, 36, 36, 38))) g.FillPath(br, path);
+                using (var path = Renderer.Round(backdropPanel, Ui.CardRadius)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
+                foreach (var btn in backdropBtns)
+                {
+                    bool cur = btn.Id == "bdoff" ? backdrop < 0 : btn.Id == "bdc" ? backdrop >= 0 && backdropColor.HasValue : backdrop == int.Parse(btn.Id.Substring(2)) && !backdropColor.HasValue;
+                    var r = btn.R;
+                    if (btn.Id == "bdoff")
+                    {
+                        using (var br = new SolidBrush(Color.FromArgb(52, 52, 56))) g.FillEllipse(br, r);
+                        using (var p = new Pen(Color.FromArgb(160, 160, 166), 1.6f)) g.DrawLine(p, r.X + 6, r.Bottom - 6, r.Right - 6, r.Y + 6);
+                    }
+                    else
+                    {
+                        var cols = btn.Id == "bdc" ? Renderer.Custom(backdropColor ?? Color.FromArgb(70, 70, 76)) : Renderer.Gradients[int.Parse(btn.Id.Substring(2))];
+                        using (var br = new LinearGradientBrush(r, cols[0], cols[1], 45f)) g.FillEllipse(br, r);
+                        if (btn.Id == "bdc") using (var f = new Font("Segoe UI", 9f)) using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center }) g.DrawString("+", f, Renderer.Contrast(cols[0]) == Color.White ? Brushes.White : Brushes.Black, r, sf);
+                    }
+                    using (var p = new Pen(cur ? Color.White : btn == hover ? Color.FromArgb(150, 255, 255, 255) : Color.FromArgb(60, 255, 255, 255), cur ? 2 : 1)) g.DrawEllipse(p, r);
                 }
             }
 
             if (!attrPanel.IsEmpty)
             {
-                using (var path = Renderer.Round(attrPanel, 20)) using (var br = new SolidBrush(Color.FromArgb(240, 36, 36, 38))) g.FillPath(br, path);
-                using (var path = Renderer.Round(attrPanel, 20)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
+                using (var path = Renderer.Round(attrPanel, Ui.CardRadius)) using (var br = new SolidBrush(Color.FromArgb(240, 36, 36, 38))) g.FillPath(br, path);
+                using (var path = Renderer.Round(attrPanel, Ui.CardRadius)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
                 using (var f = new Font("Segoe UI", 9f))
                 using (var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center })
                     foreach (var btn in attrButtons)
@@ -261,9 +359,11 @@ namespace Glint
                             if (btn.Id == "cc") g.DrawString("+", f, Renderer.Contrast(c) == Color.White ? Brushes.White : Brushes.Black, btn.R, sf);
                             continue;
                         }
+                        if (btn.Id == "mode") { DrawMode(g, btn.R, f, sf); continue; }
+                        if (btn.Id == "strength") { DrawStrength(g, btn.R, f); continue; }
                         bool active = (btn.Id == "fill" && fill) || (btn.Id == "hand" && hand);
-                        using (var path = Renderer.Round(btn.R, 10)) using (var br = new SolidBrush(active ? Hover : btn == hover ? Color.FromArgb(58, 58, 62) : Color.FromArgb(46, 46, 49))) g.FillPath(br, path);
-                        string t = btn.Id == "w-" || btn.Id == "o-" ? "−" : btn.Id == "w+" || btn.Id == "o+" ? "+" : btn.Id == "fill" ? L.T("Füllung") : L.T("Skizze");
+                        using (var path = Renderer.Round(btn.R, Ui.ControlRadius)) using (var br = new SolidBrush(active ? Hover : btn == hover ? Color.FromArgb(58, 58, 62) : Color.FromArgb(46, 46, 49))) g.FillPath(br, path);
+                        string t = btn.Id == "w-" || btn.Id == "o-" ? "−" : btn.Id == "w+" || btn.Id == "o+" ? "+" : btn.Id == "fill" ? L.T("Füllung") : btn.Id == "hand" ? L.T("Skizze") : AttrLabel(btn.Id);
                         g.DrawString(t, f, Brushes.White, btn.R, sf);
                         if (btn.Id == "w+") g.DrawString(width.ToString("0") + " px", f, Brushes.Silver, btn.R.Right + 4, btn.R.Y + 4);
                         if (btn.Id == "o+") g.DrawString(opacity + " %", f, Brushes.Silver, btn.R.Right + 4, btn.R.Y + 4);
@@ -286,6 +386,7 @@ namespace Glint
         {
             foreach (var b in buttons) if (b.R.Contains(p)) return b;
             foreach (var b in attrButtons) if (b.R.Contains(p)) return b;
+            foreach (var b in backdropBtns) if (b.R.Contains(p)) return b;
             return null;
         }
     }

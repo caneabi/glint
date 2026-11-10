@@ -21,7 +21,15 @@ namespace Glint
         Tool tool = Tool.Select;
         Obj sel, draft;
         Color color = Palette[0]; float width = 4; bool fill, hand; int opacity = 100;
-        int backdrop = -1; const int Pad = 64;
+        int backdrop = -1; const int Pad = 64; // preset index, -1 off
+        Color? backdropColor; // own color instead of a preset
+        Color[] BackdropColors { get { return backdrop < 0 ? null : backdropColor.HasValue ? Renderer.Custom(backdropColor.Value) : Renderer.Gradients[backdrop % Renderer.Gradients.Length]; } }
+        string textFont = "Segoe UI";
+        bool backdropOpen, sliding;
+        Bitmap backdropBg; string backdropKey; // cached gradient and shadow
+        Rectangle backdropPanel;
+        readonly List<Btn> backdropBtns = new List<Btn>();
+        int magShape, magZoom = 2;
         float zoom = 1; bool fit = true; PointF pan = PointF.Empty;
         readonly List<Btn> buttons = new List<Btn>(), attrButtons = new List<Btn>();
         Btn hover;
@@ -131,17 +139,63 @@ namespace Glint
         bool Interacting { get { return dragging || panning || sizing; } }
 
         // Composed lazily in paint, at most once per frame.
-        void Recompose() { composeDirty = true; cacheStale = true; if (composed == null) EnsureComposed(); Invalidate(); }
+        void Recompose() { composeDirty = true; partialOnly = false; cacheStale = true; if (composed == null) EnsureComposed(); Invalidate(); }
+
+        // Moving one object only changes where it was and where it is now.
+        bool partialOnly; Rectangle partial, viewDirty;
+        void RecomposeArea(Rectangle area)
+        {
+            if (!composeDirty) { partial = area; partialOnly = true; }
+            else if (partialOnly) partial = Rectangle.Union(partial, area);
+            composeDirty = true;
+            Invalidate();
+        }
+
+        Rectangle AreaOf(Obj o)
+        {
+            var b = Bounds2(o);
+            if (o.Ctrl.HasValue) b = RectangleF.Union(b, new RectangleF(o.Ctrl.Value, SizeF.Empty));
+            int m = (int)(o.Width * 4) + 24; // stroke, arrow head, shadow
+            return Rectangle.Inflate(Rectangle.Round(b), m, m);
+        }
 
         void EnsureComposed()
         {
             if (!composeDirty) return;
             composeDirty = false;
             if (composed != null && composed.Size != doc.Base.Size) { if (display != composed && display != null) display.Dispose(); composed.Dispose(); composed = null; display = null; }
-            if (composed == null) composed = new Bitmap(doc.Base.Width, doc.Base.Height, PixelFormat.Format32bppPArgb);
+            bool fresh = composed == null;
+            if (fresh) composed = new Bitmap(doc.Base.Width, doc.Base.Height, PixelFormat.Format32bppPArgb);
+            if (partialOnly && !fresh && display != null)
+            {
+                partialOnly = false;
+                var area = Rectangle.Intersect(partial, new Rectangle(0, 0, composed.Width, composed.Height));
+                if (area.Width <= 0 || area.Height <= 0) return;
+                Renderer.Compose(doc.Base, Objs, composed, area);
+                if (backdrop >= 0 && display != composed) Renderer.BackdropCompose(backdropBg, composed, Pad, display, area);
+                var shown = area; shown.Offset(Offset, Offset);
+                viewDirty = viewDirty.IsEmpty ? shown : Rectangle.Union(viewDirty, shown);
+                return;
+            }
+            partialOnly = false;
             Renderer.Compose(doc.Base, Objs, composed);
-            if (display != null && display != composed) display.Dispose();
-            display = backdrop >= 0 ? Renderer.Backdrop(composed, backdrop, Pad) : composed;
+            if (backdrop >= 0)
+            {
+                var cols = BackdropColors;
+                string key = composed.Width + "x" + composed.Height + cols[0].ToArgb() + cols[1].ToArgb();
+                if (key != backdropKey) { if (backdropBg != null) backdropBg.Dispose(); backdropBg = Renderer.BackdropBase(composed.Width, composed.Height, cols, Pad); backdropKey = key; }
+                if (display == null || display == composed || display.Size != backdropBg.Size)
+                {
+                    if (display != null && display != composed) display.Dispose();
+                    display = new Bitmap(backdropBg.Width, backdropBg.Height, PixelFormat.Format32bppArgb);
+                }
+                Renderer.BackdropCompose(backdropBg, composed, Pad, display);
+            }
+            else
+            {
+                if (display != null && display != composed) display.Dispose();
+                display = composed;
+            }
             cacheStale = true;
         }
 
@@ -174,7 +228,22 @@ namespace Glint
                         cg.PixelOffsetMode = PixelOffsetMode.Half;
                         cg.DrawImage(display, 0, 0, viewCache.Width, viewCache.Height);
                     }
-                    cacheZoom = zoom; cacheHq = hq; cacheStale = false;
+                    cacheZoom = zoom; cacheHq = hq; cacheStale = false; viewDirty = Rectangle.Empty;
+                }
+                else if (!viewDirty.IsEmpty)
+                {
+                    // Rescale only the part that changed.
+                    float k = viewCache.Width / (float)display.Width;
+                    var d = Rectangle.Inflate(Rectangle.FromLTRB((int)(viewDirty.Left * k), (int)(viewDirty.Top * k), (int)Math.Ceiling(viewDirty.Right * k), (int)Math.Ceiling(viewDirty.Bottom * k)), 2, 2);
+                    d.Intersect(new Rectangle(0, 0, viewCache.Width, viewCache.Height));
+                    using (var cg = Graphics.FromImage(viewCache))
+                    {
+                        cg.CompositingMode = CompositingMode.SourceCopy;
+                        cg.InterpolationMode = InterpolationMode.Bilinear;
+                        cg.PixelOffsetMode = PixelOffsetMode.Half;
+                        cg.DrawImage(display, d, new RectangleF(d.X / k, d.Y / k, d.Width / k, d.Height / k), GraphicsUnit.Pixel);
+                    }
+                    cacheHq = false; viewDirty = Rectangle.Empty;
                 }
                 g.DrawImageUnscaled(viewCache, v.X, v.Y);
             }
@@ -185,7 +254,7 @@ namespace Glint
 
         Bitmap IImageSource.CurrentImage() { return Export(); }
 
-        public Bitmap Export() { return doc.Export(backdrop, Pad); }
+        public Bitmap Export() { return doc.Export(BackdropColors, Pad); }
 
         void UpdateFit()
         {
@@ -288,7 +357,7 @@ namespace Glint
                 var c = o.Ctrl ?? new PointF((o.A.X + o.B.X) / 2, (o.A.Y + o.B.Y) / 2);
                 return new List<PointF> { o.A, o.B, c };
             }
-            if (o.Kind == Kind.Pen || o.Kind == Kind.Highlight || o.Kind == Kind.Text || o.Kind == Kind.Step) return new List<PointF>();
+            if (o.Kind == Kind.Pen || o.Kind == Kind.Highlight || o.Kind == Kind.Step) return new List<PointF>();
             var r = o.Box;
             return new List<PointF> { new PointF(r.Left, r.Top), new PointF(r.Right, r.Top), new PointF(r.Right, r.Bottom), new PointF(r.Left, r.Bottom) };
         }
@@ -390,7 +459,7 @@ namespace Glint
                 if (hit.Id == "drag") { DragOut(); return; }
                 ClickBtn(hit); return;
             }
-            if (moreOpen) { moreOpen = false; Invalidate(); }
+            if (moreOpen || backdropOpen) { moreOpen = backdropOpen = false; Invalidate(); }
             if (sizeRect.Contains(e.Location)) { ResizeDialog(); return; }
             if (zoomRect.Contains(e.Location))
             {
@@ -402,6 +471,7 @@ namespace Glint
             if (attrPanel.Contains(e.Location)) return;
             if (!CanvasArea.Contains(e.Location)) return;
             if (e.Button == MouseButtons.Middle) { panning = true; panStart = e.Location; fit = false; return; }
+            if (e.Button == MouseButtons.Right) { CanvasMenu(e.Location); return; }
             if (e.Button != MouseButtons.Left) return;
             var p = ToImage(e.Location);
             last = downAt = p; dragging = true;
@@ -427,7 +497,7 @@ namespace Glint
 
         Obj NewObj(Kind k, PointF p)
         {
-            return new Obj { Kind = k, A = p, B = p, Color = color, Width = width, Fill = fill, Hand = hand, Opacity = opacity, Seed = Environment.TickCount & 0xFFFF };
+            return new Obj { Kind = k, A = p, B = p, Color = color, Width = width, Fill = fill, Hand = hand, Opacity = opacity, Seed = Environment.TickCount & 0xFFFF, Font = textFont, Zoom = magZoom, Shape = magShape };
         }
 
         void BeginSelect(PointF p)
@@ -447,6 +517,7 @@ namespace Glint
 
         protected override void OnMouseMove(MouseEventArgs e)
         {
+            if (sliding) { SetStrength(e.X); return; }
             var hb = HitBtn(e.Location);
             if (hb != hover) { hover = hb; Invalidate(new Rectangle(0, 0, ClientSize.Width, BarH + 120)); }
             SetWinHover(closeR.Contains(e.Location) ? 3 : minR.Contains(e.Location) ? 1 : 0);
@@ -471,7 +542,15 @@ namespace Glint
                 }
                 else if (draft != null)
                 {
-                    if (draft.Pts != null) draft.Pts.Add(p);
+                    if (draft.Pts != null && (ModifierKeys & Keys.Shift) != 0)
+                    {
+                        // Shift draws a straight stroke, snapped to 45 degrees
+                        var a0 = draft.Pts[0];
+                        double ang = Math.Round(Math.Atan2(p.Y - a0.Y, p.X - a0.X) / (Math.PI / 4)) * (Math.PI / 4);
+                        float len = Dist(p, a0);
+                        draft.Pts = new List<PointF> { a0, new PointF(a0.X + len * (float)Math.Cos(ang), a0.Y + len * (float)Math.Sin(ang)) };
+                    }
+                    else if (draft.Pts != null) draft.Pts.Add(p);
                     else if ((ModifierKeys & Keys.Shift) != 0 && draft.IsLine)
                     {
                         // snap to 45 degrees
@@ -490,7 +569,8 @@ namespace Glint
 
         void DragSelected(PointF p)
         {
-            if (handle >= 0)
+            if (handle >= 0 && sel.Kind == Kind.Text) ScaleText(p);
+            else if (handle >= 0)
             {
                 if (sel.IsLine)
                 {
@@ -506,13 +586,20 @@ namespace Glint
                     if (l > ri || t > b) { handle = (handle + 2) % 4; }
                 }
             }
-            else sel.Move(p.X - last.X, p.Y - last.Y);
+            else
+            {
+                var before = AreaOf(sel);
+                sel.Move(p.X - last.X, p.Y - last.Y);
+                if (sel.Kind == Kind.Spotlight) Recompose(); // dims the whole image
+                else RecomposeArea(Rectangle.Union(before, AreaOf(sel)));
+                return;
+            }
             Recompose();
         }
 
         protected override void OnMouseUp(MouseEventArgs e)
         {
-            panning = false;
+            panning = false; sliding = false;
             if (!dragging) return;
             dragging = false;
             if (draft != null)
@@ -605,7 +692,7 @@ namespace Glint
         {
             if (d)
             {
-                foreach (var b in new HashSet<Bitmap> { composed, display, viewCache }) if (b != null) b.Dispose();
+                foreach (var b in new HashSet<Bitmap> { composed, display, viewCache, backdropBg }) if (b != null) b.Dispose();
                 doc.Dispose();
                 if (uploadCancel != null) uploadCancel.Cancel();
                 if (fxTimer != null) fxTimer.Dispose();
@@ -716,7 +803,22 @@ namespace Glint
             OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, b.X, b.Y, 0));
             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, b.X, b.Y, 0));
         }
-        public void SetBackdrop(int i) { backdrop = i; Recompose(); }
+        // Test hook: drags the object under 'from' in small steps and returns ms per step including paint.
+        public double TestMoveSelected(PointF from, int steps, Graphics g)
+        {
+            SetTool(Tool.Select);
+            var a = Point.Round(ToScreen(from));
+            OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, a.X, a.Y, 0));
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+            for (int i = 1; i <= steps; i++) { OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, a.X + i * 3, a.Y + i, 0)); PaintAll(g); }
+            double ms = sw.Elapsed.TotalMilliseconds / steps;
+            OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, a.X + steps * 3, a.Y + steps, 0));
+            return ms;
+        }
+
+        public void TestUi(Tool t, bool backdropChoices) { SetTool(t); backdropOpen = backdropChoices; Invalidate(); }
+
+        public void SetBackdrop(int i) { backdrop = i; backdropColor = null; Recompose(); }
         public void SetFitSize(Size s) { ClientSize = s; }
     }
 }
