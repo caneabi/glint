@@ -148,16 +148,20 @@ namespace Glint
             if (!composeDirty) { partial = area; partialOnly = true; }
             else if (partialOnly) partial = Rectangle.Union(partial, area);
             composeDirty = true;
-            Invalidate();
+            InvalidateImage(area);
         }
 
-        Rectangle AreaOf(Obj o)
+        public Rectangle LastDirty; // test hook: the window part the last move repainted
+
+        // Repaints only the window part that shows this image area, handles included.
+        void InvalidateImage(Rectangle area)
         {
-            var b = Bounds2(o);
-            if (o.Ctrl.HasValue) b = RectangleF.Union(b, new RectangleF(o.Ctrl.Value, SizeF.Empty));
-            int m = (int)(o.Width * 4) + 24; // stroke, arrow head, shadow
-            return Rectangle.Inflate(Rectangle.Round(b), m, m);
+            var p1 = ToScreen(new PointF(area.Left, area.Top)); var p2 = ToScreen(new PointF(area.Right, area.Bottom));
+            LastDirty = Rectangle.Inflate(Rectangle.FromLTRB((int)Math.Floor(p1.X), (int)Math.Floor(p1.Y), (int)Math.Ceiling(p2.X), (int)Math.Ceiling(p2.Y)), 14, 14);
+            Invalidate(LastDirty);
         }
+
+        static Rectangle AreaOf(Obj o) { return Renderer.Reach(o); }
 
         void EnsureComposed()
         {
@@ -291,7 +295,7 @@ namespace Glint
             g.Clear(Bg);
             var a = CanvasArea;
             var state = g.Save();
-            g.SetClip(a);
+            g.SetClip(a, CombineMode.Intersect);
             var v = ViewRect();
             if (checker == null)
                 using (var tile = new Bitmap(24, 24))
@@ -312,7 +316,10 @@ namespace Glint
             if (tool == Tool.Ruler && hoverValid) DrawRuler(g);
             g.Restore(state);
             g.SmoothingMode = SmoothingMode.AntiAlias;
-            PaintBars(g);
+            // Bars, panels and tips sit at the top, skip them when the repaint is somewhere else.
+            var bars = new Rectangle(0, 0, ClientSize.Width, Math.Max(BarH + 130, Math.Max(attrPanel.Bottom, backdropPanel.Bottom) + 50));
+            if (!morePanel.IsEmpty) bars = Rectangle.Union(bars, Rectangle.Inflate(morePanel, 4, 40));
+            if (g.ClipBounds.IntersectsWith(bars)) PaintBars(g);
         }
 
         void DrawDraft(Graphics g)
@@ -562,7 +569,8 @@ namespace Glint
                 }
                 last = p;
             }
-            if (dragging || tool == Tool.Ruler || panning) Invalidate(); else InvalidateStatus();
+            if (dragging && tool == Tool.Select && sel != null && handle < 0) { } // the move already repainted its area
+            else if (dragging || tool == Tool.Ruler || panning) Invalidate(); else InvalidateStatus();
         }
 
         void InvalidateStatus() { Invalidate(colorRect); }
@@ -810,7 +818,7 @@ namespace Glint
             var a = Point.Round(ToScreen(from));
             OnMouseDown(new MouseEventArgs(MouseButtons.Left, 1, a.X, a.Y, 0));
             var sw = System.Diagnostics.Stopwatch.StartNew();
-            for (int i = 1; i <= steps; i++) { OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, a.X + i * 3, a.Y + i, 0)); PaintAll(g); }
+            for (int i = 1; i <= steps; i++) { OnMouseMove(new MouseEventArgs(MouseButtons.Left, 0, a.X + i * 3, a.Y + i, 0)); var st = g.Save(); g.SetClip(LastDirty); PaintAll(g); g.Restore(st); }
             double ms = sw.Elapsed.TotalMilliseconds / steps;
             OnMouseUp(new MouseEventArgs(MouseButtons.Left, 1, a.X + steps * 3, a.Y + steps, 0));
             return ms;

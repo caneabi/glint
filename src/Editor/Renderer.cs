@@ -31,9 +31,26 @@ namespace Glint
                         foreach (var s in spots) rgn.Exclude(s.Box);
                         using (var b = new SolidBrush(Color.FromArgb(spots[0].Opacity * 2, 0, 0, 0))) g.FillRegion(b, rgn);
                     }
-                foreach (var o in objs) if (o.Kind != Kind.Spotlight) Draw(g, c, src, o);
+                foreach (var o in objs)
+                    if (o.Kind != Kind.Spotlight && (!clip.HasValue || Reach(o).IntersectsWith(clip.Value))) Draw(g, c, src, o);
             }
             return c;
+        }
+
+        // Everything an object can paint on, with room for strokes, arrow heads and shadows.
+        public static Rectangle Reach(Obj o)
+        {
+            RectangleF b = o.Box;
+            if (o.Pts != null && o.Pts.Count > 0)
+            {
+                float l = float.MaxValue, t = float.MaxValue, r = float.MinValue, bo = float.MinValue;
+                foreach (var p in o.Pts) { l = Math.Min(l, p.X); t = Math.Min(t, p.Y); r = Math.Max(r, p.X); bo = Math.Max(bo, p.Y); }
+                b = RectangleF.FromLTRB(l, t, r, bo);
+            }
+            if (o.Ctrl.HasValue) b = RectangleF.Union(b, new RectangleF(o.Ctrl.Value, SizeF.Empty));
+            if (o.Kind == Kind.Step) { float rr = 12 + o.Width * 1.6f; b = new RectangleF(o.A.X - rr, o.A.Y - rr, rr * 2, rr * 2); }
+            int m = (int)(o.Width * 4) + 24;
+            return Rectangle.Inflate(Rectangle.Round(b), m, m);
         }
 
         static Rectangle Clip(RectangleF f, Bitmap b)

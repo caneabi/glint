@@ -49,7 +49,15 @@ namespace Glint
         }
 
         // Kind the attribute bar talks about: the selection, or what the current tool makes.
-        Kind? AttrKind { get { return sel != null ? sel.Kind : tool == Tool.Text ? Kind.Text : tool == Tool.Magnifier ? Kind.Magnifier : tool == Tool.Blur ? Kind.Blur : tool == Tool.Pixelate ? Kind.Pixelate : (Kind?)null; } }
+        Kind? AttrKind
+        {
+            get
+            {
+                if (sel != null) return sel.Kind;
+                Kind k;
+                return Enum.TryParse(tool.ToString(), out k) ? k : (Kind?)null; // tools are named after what they draw
+            }
+        }
 
         List<Tuple<string, int, string>> AttrExtras()
         {
@@ -151,23 +159,34 @@ namespace Glint
             attrPanel = Rectangle.Empty;
             if (AttrVisible)
             {
+                // Only the options that change something for this kind.
+                var k = AttrKind;
+                bool colorOn = k != Kind.Blur && k != Kind.Pixelate && k != Kind.Erase && k != Kind.Image;
+                bool widthOn = k != Kind.Text && k != Kind.Blur && k != Kind.Pixelate && k != Kind.Erase && k != Kind.Image && k != Kind.Spotlight;
+                bool fillOn = k == Kind.Rect || k == Kind.Oval || k == Kind.Text;
+                bool handOn = k == Kind.Rect || k == Kind.Oval || k == Kind.Arrow || k == Kind.Line || k == Kind.Text;
+                bool opacityOn = k != Kind.Blur && k != Kind.Pixelate && k != Kind.Erase;
                 var extras = AttrExtras();
-                int pw = Palette.Length * 24 + 24 + 16 + 26 * 2 + 44 + 8 + 66 * 2 + 16 + 26 * 2 + 44 + 26 + extras.Sum(ex => ex.Item2 + 4) + (extras.Count > 0 ? 12 : 0);
-                attrPanel = new Rectangle((cw - pw) / 2, BarH + 8, pw, 40);
-                int ax = attrPanel.X + 13, ay = attrPanel.Y;
-                for (int i = 0; i < Palette.Length; i++) { attrButtons.Add(new Btn { Id = "c" + i, Tip = L.T("Farbe"), R = new Rectangle(ax, ay + 11, 18, 18) }); ax += 24; }
-                attrButtons.Add(new Btn { Id = "cc", Tip = L.T("Eigene Farbe"), R = new Rectangle(ax, ay + 11, 18, 18) }); ax += 24 + 16;
-                foreach (var t in new[] { L.T("w-|Dünner"), L.T("w+|Dicker"), L.T("fill|Füllung"), L.T("hand|Handgezeichnet"), L.T("o-|Weniger Deckkraft"), L.T("o+|Mehr Deckkraft") })
+                int ax = 13;
+                if (colorOn)
                 {
-                    var p = t.Split('|');
-                    int w = p[0] == "fill" || p[0] == "hand" ? 62 : 24;
-                    attrButtons.Add(new Btn { Id = p[0], Tip = p[1], R = new Rectangle(ax, ay + 8, w, 24) });
-                    ax += w + 4;
-                    if (p[0] == "w+" || p[0] == "o+") ax += 44;
-                    if (p[0] == "hand") ax += 12;
+                    for (int i = 0; i < Palette.Length; i++) { attrButtons.Add(new Btn { Id = "c" + i, Tip = L.T("Farbe"), R = new Rectangle(ax, 11, 18, 18) }); ax += 24; }
+                    attrButtons.Add(new Btn { Id = "cc", Tip = L.T("Eigene Farbe"), R = new Rectangle(ax, 11, 18, 18) }); ax += 24 + 16;
                 }
-                if (extras.Count > 0) ax += 12;
-                foreach (var ex in extras) { attrButtons.Add(new Btn { Id = ex.Item1, Tip = ex.Item3, R = new Rectangle(ax, ay + 8, ex.Item2, 24) }); ax += ex.Item2 + 4; }
+                Action<string, string, int, int> add = (id, tip, w, after) => { attrButtons.Add(new Btn { Id = id, Tip = tip, R = new Rectangle(ax, 8, w, 24) }); ax += w + 4 + after; };
+                if (widthOn) { add("w-", L.T("Dünner"), 24, 0); add("w+", L.T("Dicker"), 24, 44); }
+                if (fillOn) add("fill", L.T("Füllung"), 62, 0);
+                if (handOn) add("hand", L.T("Handgezeichnet"), 62, 0);
+                if (fillOn || handOn) ax += 12;
+                if (opacityOn) { add("o-", L.T("Weniger Deckkraft"), 24, 0); add("o+", L.T("Mehr Deckkraft"), 24, 44); }
+                if (extras.Count > 0 && ax > 13) ax += 8;
+                foreach (var ex in extras) add(ex.Item1, ex.Item3, ex.Item2, 0);
+                if (attrButtons.Count > 0)
+                {
+                    int pw = ax + 9;
+                    attrPanel = new Rectangle((cw - pw) / 2, BarH + 8, pw, 40);
+                    foreach (var b in attrButtons) b.R.Offset(attrPanel.X, attrPanel.Y);
+                }
             }
 
             // Backdrop choices, laid out like the color dots.
