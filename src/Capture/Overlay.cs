@@ -670,7 +670,9 @@ namespace Glint
         void FinishWindow(Native.WinInfo info)
         {
             Hide();
-            var img = Imaging.GrabWindow(info.H);
+            var own = info.R; own.Offset(-virt.X, -virt.Y);
+            // Glint's own windows come from the frozen shot, PrintWindow returns them white.
+            var img = frozen && Imaging.IsGlintWindow(info.H) ? Imaging.Crop(shot, own) : Imaging.GrabWindow(info.H);
             Close();
             if (Done != null) Done(Tuple.Create(info.R, img));
         }

@@ -158,9 +158,17 @@ namespace Glint
                         }
         }
 
+        // PrintWindow comes back white for Glint's own custom drawn windows, those are taken from the screen.
+        public static bool IsGlintWindow(IntPtr h)
+        {
+            var c = Control.FromHandle(h);
+            return c is ResizableForm || c is Glass || c is Editor || c is PinWindow;
+        }
+
         public static Bitmap GrabWindow(IntPtr h)
         {
             var bounds = Native.WindowBounds(h);
+            if (bounds.Width > 0 && IsGlintWindow(h)) { Native.DwmFlush(); Native.DwmFlush(); return Grab(bounds); }
             Native.RECT wr;
             if (bounds.Width <= 0 || !Native.GetWindowRect(h, out wr)) return Grab(bounds);
             var full = Rectangle.FromLTRB(wr.L, wr.T, wr.R, wr.B);

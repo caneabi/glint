@@ -301,9 +301,9 @@ namespace Glint
             float s = PopScale(i);
             var r = Rectangle.Round(RectangleF.Inflate(full, -(1 - s) * full.Width / 2, -(1 - s) * full.Height / 2));
             var c = slots[i];
-            Ui.Pill(g, r, c, Ui.ControlRadius);
-            if (i == active) using (var path = Renderer.Round(RectangleF.Inflate(r, 2.5f, 2.5f), Ui.ControlRadius + 5)) using (var p = new Pen(Ui.Accent, 2)) g.DrawPath(p, path);
-            else using (var path = Renderer.Round(r, Ui.ControlRadius)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
+            Ui.Pill(g, r, c, Ui.CardRadius);
+            if (i == active) using (var path = Renderer.Round(RectangleF.Inflate(r, 2.5f, 2.5f), Ui.CardRadius + 5)) using (var p = new Pen(Ui.Accent, 2)) g.DrawPath(p, path);
+            else using (var path = Renderer.Round(r, Ui.CardRadius)) using (var p = new Pen(Color.FromArgb(40, 255, 255, 255))) g.DrawPath(p, path);
             using (var b = new SolidBrush(Color.FromArgb(200, Renderer.Contrast(c))))
             {
                 g.DrawString(i == 0 ? L.T("Vordergrund") : L.T("Hintergrund"), Ui.Small, b, r.X + 12, r.Bottom - 38);
@@ -314,7 +314,7 @@ namespace Glint
         void DrawContrast(Graphics g)
         {
             var r = new Rectangle(Pad, ContrastY, W - Pad * 2, 66);
-            Ui.Pill(g, r, Ui.Card, Ui.ControlRadius);
+            Ui.Pill(g, r, Ui.Card, Ui.CardRadius);
             double ratio = Colors.Wcag(slots[0], slots[1]), lc = Colors.Apca(slots[0], slots[1]);
             using (var b = new SolidBrush(Ui.Text)) g.DrawString(ratio.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture) + " : 1", Big, b, r.X + 12, r.Y + 8);
             using (var b = new SolidBrush(Ui.Dim)) g.DrawString("APCA Lc " + Math.Round(lc), Ui.Small, b, r.X + 14, r.Y + 42);
@@ -335,11 +335,11 @@ namespace Glint
         void DrawFormats(Graphics g)
         {
             var card = new Rectangle(Pad, FormatsY, W - Pad * 2, RowH * Colors.Formats.Length);
-            Ui.Pill(g, card, Ui.Card, Ui.ControlRadius);
+            Ui.Pill(g, card, Ui.Card, Ui.CardRadius);
             for (int i = 0; i < Colors.Formats.Length; i++)
             {
                 var r = RowR(i);
-                if (i == hoverRow) using (var path = Renderer.Round(RectangleF.Inflate(r, -4, -3), Ui.SmallRadius)) using (var b = new SolidBrush(Ui.Well)) g.FillPath(b, path);
+                if (i == hoverRow) using (var path = Renderer.Round(RectangleF.Inflate(r, -4, -3), Ui.CardRadius - 8)) using (var b = new SolidBrush(Ui.Well)) g.FillPath(b, path);
                 if (i > 0) Ui.Hairline(g, r.X + 12, r.Y, r.Right - 12, r.Y);
                 using (var b = new SolidBrush(Ui.Dim)) g.DrawString(Colors.Formats[i].ToUpperInvariant(), Ui.Small, b, r.X + 12, r.Y + 9);
                 string value = Colors.Format(slots[active], Colors.Formats[i]);
@@ -361,8 +361,8 @@ namespace Glint
             for (int i = 0; i < palette.Count; i++)
             {
                 var r = SwatchR(i);
-                Ui.Pill(g, r, palette[i], Ui.SmallRadius);
-                using (var path = Renderer.Round(r, Ui.SmallRadius)) using (var p = new Pen(i == hoverPalette ? Ui.Text : Color.FromArgb(50, 255, 255, 255), i == hoverPalette ? 2 : 1)) g.DrawPath(p, path);
+                Ui.Pill(g, r, palette[i], Ui.ControlRadius);
+                using (var path = Renderer.Round(r, Ui.ControlRadius)) using (var p = new Pen(i == hoverPalette ? Ui.Text : Color.FromArgb(50, 255, 255, 255), i == hoverPalette ? 2 : 1)) g.DrawPath(p, path);
             }
         }
 
