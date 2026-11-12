@@ -261,7 +261,7 @@ namespace Glint
             DrawPanel(g, PanelRect, WindowDiameter);
             if (content == null || content.Size != ClientSize || contentDirty)
             {
-                if (content == null || content.Size != ClientSize) { if (content != null) content.Dispose(); content = new Bitmap(ClientSize.Width, ClientSize.Height); }
+                if (content == null || content.Size != ClientSize) { if (content != null) content.Dispose(); content = new Bitmap(ClientSize.Width, ClientSize.Height, System.Drawing.Imaging.PixelFormat.Format32bppPArgb); }
                 using (var cg = Graphics.FromImage(content)) { cg.Clear(Color.Transparent); DrawContent(cg); }
                 contentDirty = false;
             }
