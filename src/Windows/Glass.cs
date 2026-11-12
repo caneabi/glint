@@ -14,6 +14,8 @@ namespace Glint
         protected const int S = 16; // shadow margin
         public static bool TestVisible; // test hook
         protected byte Alpha = 255; // whole window, for fade animations
+        // Windows 11 rounds normal windows by 8 px, the glass windows match that (as a diameter).
+        protected float WindowDiameter { get { return 16f * DeviceDpi / 96f; } }
         static bool Blur { get { return Settings.Current.GlassBlur; } }
         Bitmap backdrop;
         bool needBackdrop = true;

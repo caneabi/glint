@@ -258,7 +258,7 @@ namespace Glint
 
         public override void PaintTo(Graphics g)
         {
-            DrawPanel(g, PanelRect, Ui.S(Ui.CardRadius));
+            DrawPanel(g, PanelRect, WindowDiameter);
             if (content == null || content.Size != ClientSize || contentDirty)
             {
                 if (content == null || content.Size != ClientSize) { if (content != null) content.Dispose(); content = new Bitmap(ClientSize.Width, ClientSize.Height); }

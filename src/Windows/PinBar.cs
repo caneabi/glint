@@ -35,7 +35,7 @@ namespace Glint
 
         public override void PaintTo(Graphics g)
         {
-            DrawPanel(g, panel, Ui.CardRadius);
+            DrawPanel(g, panel, WindowDiameter);
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
             for (int i = 0; i < rects.Length; i++)
                 if (i == hover)

@@ -86,8 +86,8 @@ namespace Glint
 
         public override void PaintTo(Graphics g)
         {
-            DrawPanel(g, card, K(Ui.CardRadius));
-            using (var path = Renderer.Round(imgRect, K(Ui.CardRadius - MarginBase * 2))) // concentric with the card
+            DrawPanel(g, card, WindowDiameter);
+            using (var path = Renderer.Round(imgRect, Math.Max(4, WindowDiameter - K(MarginBase) * 2))) // concentric with the card
             {
                 var st = g.Save();
                 g.SetClip(path);
